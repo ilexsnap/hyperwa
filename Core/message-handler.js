@@ -93,11 +93,15 @@ async handleCommand(msg, text) {
     const command = args[0].toLowerCase();
     const params = args.slice(1);
 
-    if (!this.checkPermissions(msg, command)) {
+if (!this.checkPermissions(msg, command)) {
+    if (config.get('features.sendPermissionError', false)) {
         return this.bot.sendMessage(sender, {
             text: '❌ You don\'t have permission to use this command.'
         });
     }
+    return; // silently ignore
+}
+
 
     const userId = participant.split('@')[0];
     if (config.get('features.rateLimiting')) {
