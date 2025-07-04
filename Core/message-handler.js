@@ -174,29 +174,44 @@ if (!this.checkPermissions(msg, command)) {
         return 'unknown';
     }
 
-    checkPermissions(msg, command) {
-        const sender = msg.key.remoteJid;
-        const participant = msg.key.participant || sender;
-        const owner = config.get('bot.owner');
-        const mode = config.get('features.mode');
-        
-        // Check if user is owner
-        const isOwner = participant === owner || msg.key.fromMe;
-        
-        // Check mode restrictions
-        if (mode === 'private' && !isOwner) {
-            return false;
-        }
+checkPermissions(msg, commandName) {
+    const participant = msg.key.participant || msg.key.remoteJid;
+    const userId = participant.split('@')[0];
+    const ownerId = config.get('bot.owner');
+    const isOwner = participant === ownerId || msg.key.fromMe;
 
-        // Check blocked users
-        const blockedUsers = config.get('security.blockedUsers') || [];
-        const userId = participant.split('@')[0];
-        if (blockedUsers.includes(userId)) {
-            return false;
-        }
+    // Mode restriction
+    const mode = config.get('features.mode');
+    if (mode === 'private' && !isOwner) return false;
 
-        return true;
+    // Blocked users
+    const blockedUsers = config.get('security.blockedUsers') || [];
+    if (blockedUsers.includes(userId)) return false;
+
+    // Command-specific permission
+    const handler = this.commandHandlers.get(commandName);
+    if (!handler) return false;
+
+    const permission = handler.permissions || 'public';
+    const admins = config.get('bot.admins') || [];
+
+    switch (permission) {
+        case 'owner':
+            return isOwner;
+
+        case 'admin':
+            return isOwner || admins.includes(userId);
+
+        case 'public':
+            return true;
+
+        default:
+            if (Array.isArray(permission)) {
+                return permission.includes(userId);
+            }
+            return false;
     }
+}
 
     extractText(msg) {
         return msg.message?.conversation || 
