@@ -1,4 +1,3 @@
-
 class Config {
 constructor() {
     this.defaultConfig = {
@@ -54,11 +53,14 @@ constructor() {
                 mediaSync: true,
                 profilePicSync: true,
                 callLogs: true,
-                statusSync: true,
+                statusSync: true, // Enable/disable status sync to Telegram
                 biDirectional: true,
                 presenceUpdates: true,
                 readReceipts: true,
-                animatedStickers: true
+                animatedStickers: true,
+                autoUpdateContactNames: true, // Auto update contact names when changed
+                autoUpdateTopicNames: true, // Auto update topic names when contact names change
+                replySupport: true // Enable replying from Telegram topics to WhatsApp
             }
         },
         logging: {
