@@ -17,25 +17,31 @@ class Helpers {
         let processingMsgKey = null;
 
         try {
+            // React with ⏳
             if (autoReact) {
                 await bot.sock.sendMessage(sender, {
                     react: { key: originalMsg.key, text: '⏳' }
                 });
             }
 
+            // Show "processing..." message
             if (editMessages) {
                 const processingMsg = await bot.sendMessage(sender, { text: processingText });
                 processingMsgKey = processingMsg.key;
             }
 
+            // Run command
             const result = await actionFn();
 
+            // Wait 1.5s then remove ⏳
             if (autoReact) {
+                await Helpers.sleep(1500);
                 await bot.sock.sendMessage(sender, {
                     react: { key: originalMsg.key, text: '' }
                 });
             }
 
+            // Edit result or send new
             if (processingMsgKey && result && typeof result === 'string') {
                 await bot.sock.sendMessage(sender, {
                     text: result,
@@ -53,9 +59,11 @@ class Helpers {
             return result;
 
         } catch (error) {
+            // Wait 1.5s then replace ⏳ with ❌
             if (autoReact) {
+                await Helpers.sleep(1500);
                 await bot.sock.sendMessage(sender, {
-                    react: { key: originalMsg.key, text: '' }
+                    react: { key: originalMsg.key, text: '❌' }
                 });
             }
 
