@@ -20,7 +20,8 @@ class Config {
                 smartProcessing: true, // Enable smart message processing
                 editMessages: true, // Allow editing of sent messages
                 autoReact: true, // Auto react to commands
-                respondToUnknownCommands: false
+                respondToUnknownCommands: false,  // Bot send error message on wrong commands
+                sendPermissionError: false      // bot will send error message on comnd which are not allowed to users
             },
             mongo: {
                 uri: 'mongodb+srv://itxelijah07:ivp8FYGsbVfjQOkj@cluster0.wh25x.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
