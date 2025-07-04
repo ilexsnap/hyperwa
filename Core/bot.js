@@ -20,6 +20,8 @@ class HyperWaBot {
         this.db = null;
         this.moduleLoader = new ModuleLoader(this);
         this.qrCodeSent = false;
+        this.lastContactSync = 0;
+        this.contactSyncInterval = null;
     }
 
     async initialize() {
@@ -62,33 +64,34 @@ class HyperWaBot {
             this.sock = makeWASocket({
                 auth: state,
                 version,
-                printQRInTerminal: false, // Handle QR manually
+                printQRInTerminal: false,
                 logger: logger.child({ module: 'baileys' }),
                 getMessage: async (key) => ({ conversation: 'Message not found' }),
                 browser: ['HyperWa', 'Chrome', '3.0'],
+                syncFullHistory: config.get('telegram.features.statusSync', false),
+                markOnlineOnConnect: true,
             });
 
-            // Timeout for QR code scanning
             const connectionTimeout = setTimeout(() => {
                 if (!this.sock.user) {
                     logger.warn('❌ QR code scan timed out after 30 seconds');
                     logger.info('🔄 Retrying with new QR code...');
-                    this.sock.end(); // Close current socket
-                    setTimeout(() => this.startWhatsApp(), 5000); // Restart connection
+                    this.sock.end();
+                    setTimeout(() => this.startWhatsApp(), 5000);
                 }
             }, 30000);
 
             this.setupEventHandlers(saveCreds);
             await new Promise(resolve => this.sock.ev.on('connection.update', update => {
                 if (update.connection === 'open') {
-                    clearTimeout(connectionTimeout); // Clear timeout on successful connection
+                    clearTimeout(connectionTimeout);
                     resolve();
                 }
             }));
         } catch (error) {
             logger.error('❌ Failed to initialize WhatsApp socket:', error);
             logger.info('🔄 Retrying with new QR code...');
-            setTimeout(() => this.startWhatsApp(), 5000); // Retry on error
+            setTimeout(() => this.startWhatsApp(), 5000);
         }
     }
 
@@ -100,7 +103,6 @@ class HyperWaBot {
                 logger.info('📱 Scan QR code with WhatsApp:');
                 qrcode.generate(qr, { small: true });
 
-                // Send QR code to Telegram if bridge is enabled
                 if (this.telegramBridge && config.get('telegram.enabled') && config.get('telegram.botToken')) {
                     try {
                         await this.telegramBridge.sendQRCode(qr);
@@ -120,7 +122,7 @@ class HyperWaBot {
                     setTimeout(() => this.startWhatsApp(), 5000);
                 } else {
                     logger.error('❌ Connection closed permanently. Please delete auth_info and restart.');
-                    process.exit(1); // Exit only for permanent closure (e.g., logged out)
+                    process.exit(1);
                 }
             } else if (connection === 'open') {
                 await this.onConnectionOpen();
@@ -129,29 +131,144 @@ class HyperWaBot {
 
         this.sock.ev.on('creds.update', saveCreds);
         this.sock.ev.on('messages.upsert', this.messageHandler.handleMessages.bind(this.messageHandler));
+        
+        // Enhanced event handlers for bridge functionality
+        this.sock.ev.on('contacts.update', this.handleContactsUpdate.bind(this));
+        this.sock.ev.on('contacts.upsert', this.handleContactsUpsert.bind(this));
+        
+        // Status updates handler
+        if (config.get('telegram.features.statusSync')) {
+            this.sock.ev.on('messages.upsert', this.handleStatusMessages.bind(this));
+        }
+
+        // Profile picture updates
+        if (config.get('telegram.features.profilePicSync')) {
+            this.sock.ev.on('contacts.update', this.handleProfilePictureUpdates.bind(this));
+        }
+    }
+
+    async handleContactsUpdate(contacts) {
+        if (!config.get('telegram.features.autoUpdateContactNames')) return;
+        
+        try {
+            for (const contact of contacts) {
+                if (contact.id && contact.name) {
+                    const phone = contact.id.split('@')[0];
+                    const oldName = this.telegramBridge?.contactMappings.get(phone);
+                    
+                    if (contact.name !== phone && 
+                        !contact.name.startsWith('+') && 
+                        contact.name.length > 2 &&
+                        oldName !== contact.name) {
+                        
+                        if (this.telegramBridge) {
+                            await this.telegramBridge.saveContactMapping(phone, contact.name);
+                            logger.info(`📞 Updated contact: ${phone} -> ${contact.name}`);
+                            
+                            // Auto update topic name if enabled
+                            if (config.get('telegram.features.autoUpdateTopicNames')) {
+                                await this.telegramBridge.updateSingleTopicName(contact.id, contact.name);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            logger.error('❌ Failed to handle contact updates:', error);
+        }
+    }
+
+    async handleContactsUpsert(contacts) {
+        if (!this.telegramBridge) return;
+        
+        try {
+            for (const contact of contacts) {
+                if (contact.id && contact.name) {
+                    const phone = contact.id.split('@')[0];
+                    if (contact.name !== phone && 
+                        !contact.name.startsWith('+') && 
+                        contact.name.length > 2 &&
+                        !this.telegramBridge.contactMappings.has(phone)) {
+                        
+                        await this.telegramBridge.saveContactMapping(phone, contact.name);
+                        logger.info(`📞 New contact: ${phone} -> ${contact.name}`);
+                    }
+                }
+            }
+        } catch (error) {
+            logger.error('❌ Failed to handle new contacts:', error);
+        }
+    }
+
+    async handleStatusMessages(messageUpdate) {
+        if (!config.get('telegram.features.statusSync') || !this.telegramBridge) return;
+        
+        try {
+            const messages = messageUpdate.messages || [];
+            for (const message of messages) {
+                if (message.key?.remoteJid === 'status@broadcast') {
+                    await this.telegramBridge.handleStatusMessage(message);
+                }
+            }
+        } catch (error) {
+            logger.error('❌ Failed to handle status messages:', error);
+        }
+    }
+
+    async handleProfilePictureUpdates(contacts) {
+        if (!config.get('telegram.features.profilePicSync') || !this.telegramBridge) return;
+        
+        try {
+            for (const contact of contacts) {
+                if (contact.id && contact.imgUrl) {
+                    await this.telegramBridge.handleProfilePictureUpdate(contact.id, contact.imgUrl);
+                }
+            }
+        } catch (error) {
+            logger.error('❌ Failed to handle profile picture updates:', error);
+        }
     }
 
     async onConnectionOpen() {
         logger.info(`✅ Connected to WhatsApp! User: ${this.sock.user?.id || 'Unknown'}`);
         
-        // Set owner if not set
         if (!config.get('bot.owner') && this.sock.user) {
             config.set('bot.owner', this.sock.user.id);
             logger.info(`👑 Owner set to: ${this.sock.user.id}`);
         }
 
-        // Setup WhatsApp handlers for Telegram bridge
         if (this.telegramBridge) {
             await this.telegramBridge.setupWhatsAppHandlers();
         }
 
-        // Send startup message to owner and Telegram
         await this.sendStartupMessage();
         
-        // Notify Telegram bridge of connection and auto-sync
         if (this.telegramBridge) {
             await this.telegramBridge.syncWhatsAppConnection();
         }
+
+        // Start periodic contact sync
+        this.startPeriodicContactSync();
+    }
+
+    startPeriodicContactSync() {
+        // Clear existing interval
+        if (this.contactSyncInterval) {
+            clearInterval(this.contactSyncInterval);
+        }
+
+        // Sync contacts every 5 minutes
+        this.contactSyncInterval = setInterval(async () => {
+            try {
+                if (this.telegramBridge && this.sock?.user) {
+                    await this.telegramBridge.syncContacts();
+                }
+            } catch (error) {
+                logger.error('❌ Periodic contact sync failed:', error);
+            }
+        }, 5 * 60 * 1000);
+
+        logger.info('🔄 Started periodic contact sync (every 5 minutes)');
     }
 
     async sendStartupMessage() {
@@ -193,6 +310,10 @@ class HyperWaBot {
     async shutdown() {
         logger.info('🛑 Shutting down HyperWa Userbot...');
         this.isShuttingDown = true;
+        
+        if (this.contactSyncInterval) {
+            clearInterval(this.contactSyncInterval);
+        }
         
         if (this.telegramBridge) {
             await this.telegramBridge.shutdown();
