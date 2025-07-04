@@ -19,7 +19,8 @@ class Config {
                 telegramBridge: true, // Enable Telegram bridge integration
                 smartProcessing: true, // Enable smart message processing
                 editMessages: true, // Allow editing of sent messages
-                autoReact: true // Auto react to commands
+                autoReact: true, // Auto react to commands
+                respondToUnknownCommands: false
             },
             mongo: {
                 uri: 'mongodb+srv://itxelijah07:ivp8FYGsbVfjQOkj@cluster0.wh25x.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
