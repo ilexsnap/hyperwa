@@ -20,7 +20,7 @@ class CoreCommands {
                 name: 'ping',
                 description: 'Check bot response time',
                 usage: '.ping',
-                permissions: 'public',
+                permissions: 'private',
                 execute: this.ping.bind(this)
             },
             {
