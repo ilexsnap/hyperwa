@@ -54,81 +54,82 @@ class HyperWaBot {
         logger.info('✅ HyperWa Userbot initialized successfully!');
     }
 
-async startWhatsApp() {
-    const { state, saveCreds } = await useMultiFileAuthState(this.authPath);
-    const { version } = await fetchLatestBaileysVersion();
+    async startWhatsApp() {
+        const { state, saveCreds } = await useMultiFileAuthState(this.authPath);
+        const { version } = await fetchLatestBaileysVersion();
 
-    try {
-        this.sock = makeWASocket({
-            auth: state,
-            version,
-            printQRInTerminal: false, // Handle QR manually
-            logger: logger.child({ module: 'baileys' }),
-            getMessage: async (key) => ({ conversation: 'Message not found' })
-        });
+        try {
+            this.sock = makeWASocket({
+                auth: state,
+                version,
+                printQRInTerminal: false, // Handle QR manually
+                logger: logger.child({ module: 'baileys' }),
+                getMessage: async (key) => ({ conversation: 'Message not found' }),
+                browser: ['HyperWa', 'Chrome', '3.0'],
+            });
 
-        // Timeout for QR code scanning
-        const connectionTimeout = setTimeout(() => {
-            if (!this.sock.user) {
-                logger.warn('❌ QR code scan timed out after 30 seconds');
-                logger.info('🔄 Retrying with new QR code...');
-                this.sock.end(); // Close current socket
-                setTimeout(() => this.startWhatsApp(), 5000); // Restart connection
-            }
-        }, 30000);
+            // Timeout for QR code scanning
+            const connectionTimeout = setTimeout(() => {
+                if (!this.sock.user) {
+                    logger.warn('❌ QR code scan timed out after 30 seconds');
+                    logger.info('🔄 Retrying with new QR code...');
+                    this.sock.end(); // Close current socket
+                    setTimeout(() => this.startWhatsApp(), 5000); // Restart connection
+                }
+            }, 30000);
 
-        this.setupEventHandlers(saveCreds);
-        await new Promise(resolve => this.sock.ev.on('connection.update', update => {
-            if (update.connection === 'open') {
-                clearTimeout(connectionTimeout); // Clear timeout on successful connection
-                resolve();
-            }
-        }));
-    } catch (error) {
-        logger.error('❌ Failed to initialize WhatsApp socket:', error);
-        logger.info('🔄 Retrying with new QR code...');
-        setTimeout(() => this.startWhatsApp(), 5000); // Retry on error
+            this.setupEventHandlers(saveCreds);
+            await new Promise(resolve => this.sock.ev.on('connection.update', update => {
+                if (update.connection === 'open') {
+                    clearTimeout(connectionTimeout); // Clear timeout on successful connection
+                    resolve();
+                }
+            }));
+        } catch (error) {
+            logger.error('❌ Failed to initialize WhatsApp socket:', error);
+            logger.info('🔄 Retrying with new QR code...');
+            setTimeout(() => this.startWhatsApp(), 5000); // Retry on error
+        }
     }
-}
 
-setupEventHandlers(saveCreds) {
-    this.sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
+    setupEventHandlers(saveCreds) {
+        this.sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
 
-        if (qr) {
-            logger.info('📱 Scan QR code with WhatsApp:');
-            qrcode.generate(qr, { small: true });
+            if (qr) {
+                logger.info('📱 Scan QR code with WhatsApp:');
+                qrcode.generate(qr, { small: true });
 
-            // Send QR code to Telegram if bridge is enabled
-            if (this.telegramBridge && config.get('telegram.enabled') && config.get('telegram.botToken')) {
-                try {
-                    await this.telegramBridge.sendQRCode(qr);
-                    logger.info('✅ QR code sent to Telegram');
-                } catch (error) {
-                    logger.error('❌ Failed to send QR code to Telegram:', error);
+                // Send QR code to Telegram if bridge is enabled
+                if (this.telegramBridge && config.get('telegram.enabled') && config.get('telegram.botToken')) {
+                    try {
+                        await this.telegramBridge.sendQRCode(qr);
+                        logger.info('✅ QR code sent to Telegram');
+                    } catch (error) {
+                        logger.error('❌ Failed to send QR code to Telegram:', error);
+                    }
                 }
             }
-        }
 
-        if (connection === 'close') {
-            const statusCode = lastDisconnect?.error?.output?.statusCode || 0;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            if (connection === 'close') {
+                const statusCode = lastDisconnect?.error?.output?.statusCode || 0;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
-            if (shouldReconnect && !this.isShuttingDown) {
-                logger.warn('🔄 Connection closed, reconnecting...');
-                setTimeout(() => this.startWhatsApp(), 5000);
-            } else {
-                logger.error('❌ Connection closed permanently. Please delete auth_info and restart.');
-                process.exit(1); // Exit only for permanent closure (e.g., logged out)
+                if (shouldReconnect && !this.isShuttingDown) {
+                    logger.warn('🔄 Connection closed, reconnecting...');
+                    setTimeout(() => this.startWhatsApp(), 5000);
+                } else {
+                    logger.error('❌ Connection closed permanently. Please delete auth_info and restart.');
+                    process.exit(1); // Exit only for permanent closure (e.g., logged out)
+                }
+            } else if (connection === 'open') {
+                await this.onConnectionOpen();
             }
-        } else if (connection === 'open') {
-            await this.onConnectionOpen();
-        }
-    });
+        });
 
-    this.sock.ev.on('creds.update', saveCreds);
-    this.sock.ev.on('messages.upsert', this.messageHandler.handleMessages.bind(this.messageHandler));
-}
+        this.sock.ev.on('creds.update', saveCreds);
+        this.sock.ev.on('messages.upsert', this.messageHandler.handleMessages.bind(this.messageHandler));
+    }
 
     async onConnectionOpen() {
         logger.info(`✅ Connected to WhatsApp! User: ${this.sock.user?.id || 'Unknown'}`);
@@ -147,7 +148,7 @@ setupEventHandlers(saveCreds) {
         // Send startup message to owner and Telegram
         await this.sendStartupMessage();
         
-        // Notify Telegram bridge of connection
+        // Notify Telegram bridge of connection and auto-sync
         if (this.telegramBridge) {
             await this.telegramBridge.syncWhatsAppConnection();
         }

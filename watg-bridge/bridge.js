@@ -39,11 +39,6 @@ class TelegramBridge {
             await this.setupTelegramHandlers();
             await this.commands.registerBotCommands();
             
-            // Auto-sync contacts on initialization
-            if (this.whatsappBot?.sock?.user) {
-                setTimeout(() => this.syncContacts(), 5000);
-            }
-            
             logger.info('✅ Telegram bridge initialized successfully');
         } catch (error) {
             logger.error('❌ Failed to initialize Telegram bridge:', error);
@@ -752,6 +747,9 @@ class TelegramBridge {
                     `✅ *WhatsApp Connected*\n\n👤 User: ${user.name || 'Unknown'}\n📱 Number: ${user.id}\n⏰ ${new Date().toLocaleString()}`,
                     { parse_mode: 'Markdown' }
                 );
+                
+                // Auto-sync contacts on connection
+                setTimeout(() => this.syncContacts(), 2000);
             }
         } catch (error) {
             logger.error('❌ Failed to sync WhatsApp connection:', error);
