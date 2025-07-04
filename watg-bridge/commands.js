@@ -35,11 +35,17 @@ class TelegramCommands {
                 case '/updatetopics':
                     await this.handleUpdateTopics(msg.chat.id);
                     break;
-                case '/config':
-                    await this.handleConfig(msg.chat.id, args);
-                    break;
                 case '/settings':
                     await this.handleSettings(msg.chat.id);
+                    break;
+                case '/whatsapp':
+                    await this.handleWhatsAppSettings(msg.chat.id);
+                    break;
+                case '/bridge':
+                    await this.handleBridgeSettings(msg.chat.id);
+                    break;
+                case '/config':
+                    await this.handleConfig(msg.chat.id, args);
                     break;
                 default:
                     await this.handleMenu(msg.chat.id);
@@ -61,7 +67,7 @@ class TelegramCommands {
             `Linked Chats: ${this.bridge.chatMappings.size}\n` +
             `Contacts: ${this.bridge.contactMappings.size}\n` +
             `Users: ${this.bridge.userMappings.size}\n\n` +
-            `Use /menu to see all available commands.`;
+            `Use /settings to configure the bot`;
         await this.bridge.telegramBot.sendMessage(chatId, welcome, { parse_mode: 'Markdown' });
     }
 
@@ -71,8 +77,13 @@ class TelegramCommands {
             `👤 User: ${this.bridge.whatsappBot?.sock?.user?.name || 'Unknown'}\n` +
             `💬 Chats: ${this.bridge.chatMappings.size}\n` +
             `👥 Users: ${this.bridge.userMappings.size}\n` +
-            `📞 Contacts: ${this.bridge.contactMappings.size}\n` +
-            `📱 Status Topic: ${this.bridge.statusTopicId ? '✅ Active' : '❌ Not Created'}`;
+            `📞 Contacts: ${this.bridge.contactMappings.size}\n\n` +
+            `🔧 *Features Status:*\n` +
+            `• Status Sync: ${config.get('telegram.features.statusSync') ? '✅' : '❌'}\n` +
+            `• Profile Pic Sync: ${config.get('telegram.features.profilePicSync') ? '✅' : '❌'}\n` +
+            `• Auto Update Contacts: ${config.get('telegram.features.autoUpdateContactNames') ? '✅' : '❌'}\n` +
+            `• Auto Update Topics: ${config.get('telegram.features.autoUpdateTopicNames') ? '✅' : '❌'}\n` +
+            `• Read Receipts: ${config.get('telegram.features.readReceipts') ? '✅' : '❌'}`;
         await this.bridge.telegramBot.sendMessage(chatId, status, { parse_mode: 'Markdown' });
     }
 
@@ -99,27 +110,14 @@ class TelegramCommands {
     }
 
     async handleSync(chatId) {
-        const processingMsg = await this.bridge.telegramBot.sendMessage(chatId, '🔄 Syncing contacts...', { parse_mode: 'Markdown' });
+        await this.bridge.telegramBot.sendMessage(chatId, '🔄 Syncing contacts...', { parse_mode: 'Markdown' });
         try {
-            const syncedCount = await this.bridge.syncContacts();
-            await this.bridge.saveMappingsToDb();
-            await this.bridge.telegramBot.editMessageText(
-                `✅ Synced ${syncedCount} contacts from WhatsApp`,
-                {
-                    chat_id: chatId,
-                    message_id: processingMsg.message_id,
-                    parse_mode: 'Markdown'
-                }
-            );
+            const result = await this.bridge.syncContacts();
+            await this.bridge.telegramBot.sendMessage(chatId,
+                `✅ Synced ${result.synced} new contacts (Total: ${result.total})`,
+                { parse_mode: 'Markdown' });
         } catch (error) {
-            await this.bridge.telegramBot.editMessageText(
-                `❌ Failed to sync: ${error.message}`,
-                {
-                    chat_id: chatId,
-                    message_id: processingMsg.message_id,
-                    parse_mode: 'Markdown'
-                }
-            );
+            await this.bridge.telegramBot.sendMessage(chatId, `❌ Failed to sync: ${error.message}`, { parse_mode: 'Markdown' });
         }
     }
 
@@ -131,11 +129,13 @@ class TelegramCommands {
                 return;
             }
             
-            // Limit to first 50 contacts to avoid message length limits
-            const contactList = contacts.slice(0, 50).map(([phone, name]) => `📱 ${name || 'Unknown'} (+${phone})`).join('\n');
-            const moreText = contacts.length > 50 ? `\n\n... and ${contacts.length - 50} more contacts` : '';
+            const contactList = contacts
+                .slice(0, 50) // Limit to first 50 contacts
+                .map(([phone, name]) => `📱 ${name || 'Unknown'} (+${phone})`)
+                .join('\n');
             
-            await this.bridge.telegramBot.sendMessage(chatId, `📞 *Contacts* (${contacts.length} total)\n\n${contactList}${moreText}`, { parse_mode: 'Markdown' });
+            const message = `📞 *Contacts (${contacts.length} total, showing first 50)*\n\n${contactList}`;
+            await this.bridge.telegramBot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
         } catch (error) {
             logger.error('❌ Failed to list contacts:', error);
             await this.bridge.telegramBot.sendMessage(chatId, `❌ Error: ${error.message}`, { parse_mode: 'Markdown' });
@@ -162,8 +162,11 @@ class TelegramCommands {
                 return;
             }
 
-            const result = matches.map(([phone, name]) => `📱 ${name || 'Unknown'} (+${phone})`).join('\n');
-            await this.bridge.telegramBot.sendMessage(chatId, `🔍 *Search Results* (${matches.length} found)\n\n${result}`, { parse_mode: 'Markdown' });
+            const result = matches
+                .slice(0, 20) // Limit to 20 results
+                .map(([phone, name]) => `📱 ${name || 'Unknown'} (+${phone})`)
+                .join('\n');
+            await this.bridge.telegramBot.sendMessage(chatId, `🔍 *Search Results (${matches.length} found)*\n\n${result}`, { parse_mode: 'Markdown' });
         } catch (error) {
             logger.error('❌ Failed to search contacts:', error);
             await this.bridge.telegramBot.sendMessage(chatId, `❌ Error: ${error.message}`, { parse_mode: 'Markdown' });
@@ -171,109 +174,147 @@ class TelegramCommands {
     }
 
     async handleUpdateTopics(chatId) {
-        const processingMsg = await this.bridge.telegramBot.sendMessage(chatId, '📝 Updating topic names...', { parse_mode: 'Markdown' });
-        
+        await this.bridge.telegramBot.sendMessage(chatId, '📝 Updating topic names...', { parse_mode: 'Markdown' });
         try {
-            const result = await this.bridge.updateAllTopicNames();
-            await this.bridge.telegramBot.editMessageText(
-                `✅ Topic names updated!\n\n📝 Updated: ${result.updated}\n❌ Failed: ${result.failed}`,
-                {
-                    chat_id: chatId,
-                    message_id: processingMsg.message_id,
-                    parse_mode: 'Markdown'
-                }
-            );
+            const updatedCount = await this.bridge.updateTopicNames();
+            await this.bridge.telegramBot.sendMessage(chatId,
+                `✅ Updated ${updatedCount} topic names`,
+                { parse_mode: 'Markdown' });
         } catch (error) {
-            await this.bridge.telegramBot.editMessageText(
-                `❌ Failed to update topics: ${error.message}`,
-                {
-                    chat_id: chatId,
-                    message_id: processingMsg.message_id,
-                    parse_mode: 'Markdown'
-                }
-            );
+            await this.bridge.telegramBot.sendMessage(chatId, `❌ Failed to update topics: ${error.message}`, { parse_mode: 'Markdown' });
         }
+    }
+
+    async handleSettings(chatId) {
+        const settingsMenu = `⚙️ *Settings Panel*\n\n` +
+            `Choose a category to configure:\n\n` +
+            `🤖 /whatsapp - WhatsApp Bot Settings\n` +
+            `🌉 /bridge - Bridge Settings\n` +
+            `🔧 /config - View/Edit Configuration\n\n` +
+            `📊 Current Status:\n` +
+            `• WhatsApp: ${this.bridge.whatsappBot?.sock ? '✅ Connected' : '❌ Disconnected'}\n` +
+            `• Bridge: ${config.get('telegram.enabled') ? '✅ Active' : '❌ Inactive'}\n` +
+            `• Contacts: ${this.bridge.contactMappings.size} synced`;
+
+        await this.bridge.telegramBot.sendMessage(chatId, settingsMenu, { parse_mode: 'Markdown' });
+    }
+
+    async handleWhatsAppSettings(chatId) {
+        const whatsappSettings = `🤖 *WhatsApp Bot Settings*\n\n` +
+            `📱 *Connection Status:* ${this.bridge.whatsappBot?.sock ? '✅ Connected' : '❌ Disconnected'}\n` +
+            `👤 *User:* ${this.bridge.whatsappBot?.sock?.user?.name || 'Not connected'}\n` +
+            `🔢 *User ID:* ${this.bridge.whatsappBot?.sock?.user?.id || 'N/A'}\n\n` +
+            `⚙️ *Available Commands:*\n` +
+            `• /sync - Force sync contacts\n` +
+            `• /send <number> <message> - Send message\n` +
+            `• /contacts - View all contacts\n` +
+            `• /searchcontact <query> - Search contacts\n\n` +
+            `🔧 *Configuration:*\n` +
+            `• Bot Name: ${config.get('bot.name')}\n` +
+            `• Bot Version: ${config.get('bot.version')}\n` +
+            `• Prefix: ${config.get('bot.prefix')}`;
+
+        await this.bridge.telegramBot.sendMessage(chatId, whatsappSettings, { parse_mode: 'Markdown' });
+    }
+
+    async handleBridgeSettings(chatId) {
+        const bridgeSettings = `🌉 *Bridge Settings*\n\n` +
+            `🔗 *Status:* ${config.get('telegram.enabled') ? '✅ Active' : '❌ Inactive'}\n` +
+            `💬 *Mapped Chats:* ${this.bridge.chatMappings.size}\n` +
+            `👥 *Users:* ${this.bridge.userMappings.size}\n` +
+            `📞 *Contacts:* ${this.bridge.contactMappings.size}\n\n` +
+            `🎛️ *Feature Status:*\n` +
+            `• 📊 Status Sync: ${config.get('telegram.features.statusSync') ? '✅' : '❌'}\n` +
+            `• 📸 Profile Pic Sync: ${config.get('telegram.features.profilePicSync') ? '✅' : '❌'}\n` +
+            `• 🔄 Auto Update Contacts: ${config.get('telegram.features.autoUpdateContactNames') ? '✅' : '❌'}\n` +
+            `• 📝 Auto Update Topics: ${config.get('telegram.features.autoUpdateTopicNames') ? '✅' : '❌'}\n` +
+            `• 📖 Read Receipts: ${config.get('telegram.features.readReceipts') ? '✅' : '❌'}\n` +
+            `• 👁️ Presence Updates: ${config.get('telegram.features.presenceUpdates') ? '✅' : '❌'}\n` +
+            `• 🔄 Bi-Directional: ${config.get('telegram.features.biDirectional') ? '✅' : '❌'}\n\n` +
+            `⚙️ *Management Commands:*\n` +
+            `• /updatetopics - Update all topic names\n` +
+            `• /sync - Sync WhatsApp contacts\n` +
+            `• /config <feature> <true/false> - Toggle features`;
+
+        await this.bridge.telegramBot.sendMessage(chatId, bridgeSettings, { parse_mode: 'Markdown' });
     }
 
     async handleConfig(chatId, args) {
         if (args.length === 0) {
-            await this.handleSettings(chatId);
+            const configInfo = `🔧 *Configuration*\n\n` +
+                `Usage: /config <feature> <value>\n\n` +
+                `📊 *Available Features:*\n` +
+                `• statusSync - Sync WhatsApp status updates\n` +
+                `• profilePicSync - Sync profile picture updates\n` +
+                `• autoUpdateContactNames - Auto update contact names\n` +
+                `• autoUpdateTopicNames - Auto update topic names\n` +
+                `• readReceipts - Send read receipts\n` +
+                `• presenceUpdates - Send presence updates\n` +
+                `• biDirectional - Enable bi-directional messaging\n\n` +
+                `📝 *Examples:*\n` +
+                `• /config statusSync true\n` +
+                `• /config profilePicSync false\n` +
+                `• /config autoUpdateContactNames true`;
+
+            await this.bridge.telegramBot.sendMessage(chatId, configInfo, { parse_mode: 'Markdown' });
             return;
         }
 
-        if (args.length < 2) {
+        if (args.length !== 2) {
             await this.bridge.telegramBot.sendMessage(chatId,
-                '❌ Usage: /config <setting> <true|false>\nUse /settings to see all available settings',
+                '❌ Usage: /config <feature> <true/false>',
                 { parse_mode: 'Markdown' });
             return;
         }
 
-        const setting = args[0].toLowerCase();
-        const value = args[1].toLowerCase() === 'true';
+        const [feature, value] = args;
+        const boolValue = value.toLowerCase() === 'true';
 
-        const validSettings = [
-            'statussync',
-            'autoupdatecontactnames', 
-            'autoupdatetopicnames',
-            'replysupport',
-            'profilepicsync',
-            'topics',
-            'mediasync'
+        const validFeatures = [
+            'statusSync',
+            'profilePicSync', 
+            'autoUpdateContactNames',
+            'autoUpdateTopicNames',
+            'readReceipts',
+            'presenceUpdates',
+            'biDirectional'
         ];
 
-        if (!validSettings.includes(setting)) {
+        if (!validFeatures.includes(feature)) {
             await this.bridge.telegramBot.sendMessage(chatId,
-                `❌ Invalid setting. Valid options:\n${validSettings.join(', ')}`,
+                `❌ Invalid feature. Valid features: ${validFeatures.join(', ')}`,
                 { parse_mode: 'Markdown' });
             return;
         }
 
-        // Map setting names to config paths
-        const settingMap = {
-            'statussync': 'telegram.features.statusSync',
-            'autoupdatecontactnames': 'telegram.features.autoUpdateContactNames',
-            'autoupdatetopicnames': 'telegram.features.autoUpdateTopicNames',
-            'replysupport': 'telegram.features.replySupport',
-            'profilepicsync': 'telegram.features.profilePicSync',
-            'topics': 'telegram.features.topics',
-            'mediasync': 'telegram.features.mediaSync'
-        };
-
-        const configPath = settingMap[setting];
-        config.set(configPath, value);
-
-        await this.bridge.telegramBot.sendMessage(chatId,
-            `✅ Setting updated!\n\n⚙️ ${setting}: ${value ? 'Enabled' : 'Disabled'}`,
-            { parse_mode: 'Markdown' });
-    }
-
-    async handleSettings(chatId) {
-        const settingsText = `⚙️ *Bridge Settings*\n\n` +
-            `📱 Status Sync: ${config.get('telegram.features.statusSync') ? '✅' : '❌'}\n` +
-            `📝 Auto Update Contact Names: ${config.get('telegram.features.autoUpdateContactNames') ? '✅' : '❌'}\n` +
-            `🏷️ Auto Update Topic Names: ${config.get('telegram.features.autoUpdateTopicNames') ? '✅' : '❌'}\n` +
-            `💬 Reply Support: ${config.get('telegram.features.replySupport') ? '✅' : '❌'}\n` +
-            `📸 Profile Pic Sync: ${config.get('telegram.features.profilePicSync') ? '✅' : '❌'}\n` +
-            `📋 Topics: ${config.get('telegram.features.topics') ? '✅' : '❌'}\n` +
-            `🔄 Media Sync: ${config.get('telegram.features.mediaSync') ? '✅' : '❌'}\n\n` +
-            `💡 Use /config <setting> <true|false> to change settings\n` +
-            `Example: /config statusSync true`;
-
-        await this.bridge.telegramBot.sendMessage(chatId, settingsText, { parse_mode: 'Markdown' });
+        try {
+            config.set(`telegram.features.${feature}`, boolValue);
+            await this.bridge.telegramBot.sendMessage(chatId,
+                `✅ Set ${feature} to ${boolValue ? '✅ enabled' : '❌ disabled'}`,
+                { parse_mode: 'Markdown' });
+        } catch (error) {
+            await this.bridge.telegramBot.sendMessage(chatId,
+                `❌ Failed to update config: ${error.message}`,
+                { parse_mode: 'Markdown' });
+        }
     }
 
     async handleMenu(chatId) {
         const message = `ℹ️ *Available Commands*\n\n` +
+            `🏠 *Main Commands:*\n` +
             `/start - Show bot info\n` +
             `/status - Show bridge status\n` +
+            `/settings - Open settings panel\n\n` +
+            `🤖 *WhatsApp Commands:*\n` +
             `/send <number> <msg> - Send WhatsApp message\n` +
             `/sync - Sync WhatsApp contacts\n` +
             `/contacts - View WhatsApp contacts\n` +
-            `/searchcontact <name/phone> - Search contacts\n` +
-            `/updatetopics - Update all topic names\n` +
-            `/settings - View bridge settings\n` +
-            `/config <setting> <value> - Change settings\n\n` +
-            `💡 You can also reply in topics to send messages to WhatsApp!`;
+            `/searchcontact <name/phone> - Search contacts\n\n` +
+            `🌉 *Bridge Commands:*\n` +
+            `/whatsapp - WhatsApp bot settings\n` +
+            `/bridge - Bridge configuration\n` +
+            `/updatetopics - Update topic names\n` +
+            `/config <feature> <value> - Configure features`;
         await this.bridge.telegramBot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
     }
 
@@ -282,13 +323,15 @@ class TelegramCommands {
             await this.bridge.telegramBot.setMyCommands([
                 { command: 'start', description: 'Show bot info' },
                 { command: 'status', description: 'Show bridge status' },
+                { command: 'settings', description: 'Open settings panel' },
+                { command: 'whatsapp', description: 'WhatsApp bot settings' },
+                { command: 'bridge', description: 'Bridge configuration' },
                 { command: 'send', description: 'Send WhatsApp message' },
                 { command: 'sync', description: 'Sync WhatsApp contacts' },
                 { command: 'contacts', description: 'View WhatsApp contacts' },
                 { command: 'searchcontact', description: 'Search WhatsApp contacts' },
                 { command: 'updatetopics', description: 'Update topic names' },
-                { command: 'settings', description: 'View bridge settings' },
-                { command: 'config', description: 'Change bridge settings' }
+                { command: 'config', description: 'Configure features' }
             ]);
             logger.info('✅ Telegram bot commands registered');
         } catch (error) {
