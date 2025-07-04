@@ -64,15 +64,25 @@ class MessageHandler {
         );
     }
 
-// sync status with bridge 
-
-async handleStatusMessage(msg) {
-    if (this.bot.telegramBridge) {
-        const text = this.extractText(msg);
-        await this.bot.telegramBridge.syncMessage(msg, text);
+    async handleStatusMessage(msg) {
+        if (config.get('features.autoViewStatus')) {
+            try {
+                await this.bot.sock.readMessages([msg.key]);
+                await this.bot.sock.sendMessage(msg.key.remoteJid, {
+                    react: { key: msg.key, text: '❤️' }
+                });
+                logger.debug(`❤️ Liked status from ${msg.key.participant}`);
+            } catch (error) {
+                logger.error('Error handling status:', error);
+            }
+        }
+        
+        // Also sync status messages to Telegram
+        if (this.bot.telegramBridge) {
+            const text = this.extractText(msg);
+            await this.bot.telegramBridge.syncMessage(msg, text);
+        }
     }
-}
-
 
     async handleCommand(msg, text) {
         const sender = msg.key.remoteJid;
