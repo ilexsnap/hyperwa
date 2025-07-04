@@ -1,4 +1,3 @@
-
 const config = require('../config');
 const fs = require('fs-extra');
 const path = require('path');
@@ -92,6 +91,20 @@ class CoreCommands {
                 usage: '.stats',
                 permissions: 'public',
                 execute: this.stats.bind(this)
+            },
+            {
+                name: 'updatetopics',
+                description: 'Update all Telegram topic names with latest contact names',
+                usage: '.updatetopics',
+                permissions: 'owner',
+                execute: this.updateTopics.bind(this)
+            },
+            {
+                name: 'bridgeconfig',
+                description: 'Show or update bridge configuration',
+                usage: '.bridgeconfig [setting] [value]',
+                permissions: 'owner',
+                execute: this.bridgeConfig.bind(this)
             }
         ];
         this.startTime = Date.now();
@@ -119,7 +132,8 @@ class CoreCommands {
                           `📊 Commands Executed: ${totalCommands}\n` +
                           `🌐 Mode: ${config.get('features.mode')}\n` +
                           `🔗 Telegram Bridge: ${config.get('telegram.enabled') ? 'Enabled' : 'Disabled'}\n` +
-                          `📞 Contacts Synced: ${this.bot.telegramBridge?.contactMappings.size || 0}`;
+                          `📞 Contacts Synced: ${this.bot.telegramBridge?.contactMappings.size || 0}\n` +
+                          `💬 Active Topics: ${this.bot.telegramBridge?.chatMappings.size || 0}`;
         await context.bot.sendMessage(context.sender, { text: statusText });
         this.incrementCommandCount('status');
     }
@@ -138,11 +152,26 @@ class CoreCommands {
             await context.bot.sendMessage(context.sender, { text: '❌ Telegram bridge not enabled' });
             return;
         }
-        await context.bot.sendMessage(context.sender, { text: '📞 *Syncing Contacts...*\n\n⏳ Please wait...' });
-        await this.bot.telegramBridge.syncContacts();
-        await context.bot.sendMessage(context.sender, {
-            text: `✅ *Contact Sync Complete*\n\n📞 Synced ${this.bot.telegramBridge.contactMappings.size} contacts`
+        
+        const processingMsg = await context.bot.sendMessage(context.sender, { 
+            text: '📞 *Syncing Contacts...*\n\n⏳ Please wait...' 
         });
+        
+        try {
+            const syncedCount = await this.bot.telegramBridge.syncContacts();
+            await this.bot.telegramBridge.saveMappingsToDb();
+            
+            await context.bot.sock.sendMessage(context.sender, {
+                text: `✅ *Contact Sync Complete*\n\n📞 Synced ${syncedCount} contacts\n💬 Active Topics: ${this.bot.telegramBridge.chatMappings.size}\n⏰ ${new Date().toLocaleTimeString()}`,
+                edit: processingMsg.key
+            });
+        } catch (error) {
+            await context.bot.sock.sendMessage(context.sender, {
+                text: `❌ *Contact Sync Failed*\n\n🚫 Error: ${error.message}`,
+                edit: processingMsg.key
+            });
+        }
+        
         this.incrementCommandCount('sync');
     }
 
@@ -345,6 +374,118 @@ class CoreCommands {
                           `👥 Contacts: ${this.bot.telegramBridge?.contactMappings.size || 0}`;
         await context.bot.sendMessage(context.sender, { text: statsText });
         this.incrementCommandCount('stats');
+    }
+
+    async updateTopics(msg, params, context) {
+        if (!this.bot.telegramBridge) {
+            await context.bot.sendMessage(context.sender, { text: '❌ Telegram bridge not enabled' });
+            return;
+        }
+
+        const processingMsg = await context.bot.sendMessage(context.sender, { 
+            text: '📝 *Updating Topic Names...*\n\n⏳ Please wait...' 
+        });
+
+        try {
+            const result = await this.bot.telegramBridge.updateAllTopicNames();
+            
+            await context.bot.sock.sendMessage(context.sender, {
+                text: `✅ *Topic Names Updated*\n\n📝 Updated: ${result.updated}\n❌ Failed: ${result.failed}\n⏰ ${new Date().toLocaleTimeString()}`,
+                edit: processingMsg.key
+            });
+
+            if (this.bot.telegramBridge) {
+                await this.bot.telegramBridge.logToTelegram('📝 Topic Names Updated', 
+                    `Updated: ${result.updated}, Failed: ${result.failed}`);
+            }
+        } catch (error) {
+            await context.bot.sock.sendMessage(context.sender, {
+                text: `❌ *Topic Update Failed*\n\n🚫 Error: ${error.message}`,
+                edit: processingMsg.key
+            });
+        }
+
+        this.incrementCommandCount('updatetopics');
+    }
+
+    async bridgeConfig(msg, params, context) {
+        if (!this.bot.telegramBridge) {
+            await context.bot.sendMessage(context.sender, { text: '❌ Telegram bridge not enabled' });
+            return;
+        }
+
+        if (params.length === 0) {
+            // Show current configuration
+            const configText = `⚙️ *Bridge Configuration*\n\n` +
+                              `📱 Status Sync: ${config.get('telegram.features.statusSync') ? '✅' : '❌'}\n` +
+                              `📝 Auto Update Contact Names: ${config.get('telegram.features.autoUpdateContactNames') ? '✅' : '❌'}\n` +
+                              `🏷️ Auto Update Topic Names: ${config.get('telegram.features.autoUpdateTopicNames') ? '✅' : '❌'}\n` +
+                              `💬 Reply Support: ${config.get('telegram.features.replySupport') ? '✅' : '❌'}\n` +
+                              `📸 Profile Pic Sync: ${config.get('telegram.features.profilePicSync') ? '✅' : '❌'}\n` +
+                              `📋 Topics: ${config.get('telegram.features.topics') ? '✅' : '❌'}\n` +
+                              `🔄 Media Sync: ${config.get('telegram.features.mediaSync') ? '✅' : '❌'}\n\n` +
+                              `💡 Usage: \`.bridgeconfig <setting> <true|false>\`\n\n` +
+                              `Available settings:\n` +
+                              `• statusSync\n` +
+                              `• autoUpdateContactNames\n` +
+                              `• autoUpdateTopicNames\n` +
+                              `• replySupport\n` +
+                              `• profilePicSync`;
+
+            await context.bot.sendMessage(context.sender, { text: configText });
+            return;
+        }
+
+        if (params.length < 2) {
+            await context.bot.sendMessage(context.sender, { 
+                text: '❌ Usage: `.bridgeconfig <setting> <true|false>`' 
+            });
+            return;
+        }
+
+        const setting = params[0].toLowerCase();
+        const value = params[1].toLowerCase() === 'true';
+
+        const validSettings = [
+            'statussync',
+            'autoupdatecontactnames', 
+            'autoupdatetopicnames',
+            'replysupport',
+            'profilepicsync',
+            'topics',
+            'mediasync'
+        ];
+
+        if (!validSettings.includes(setting)) {
+            await context.bot.sendMessage(context.sender, { 
+                text: `❌ Invalid setting. Valid options: ${validSettings.join(', ')}` 
+            });
+            return;
+        }
+
+        // Map setting names to config paths
+        const settingMap = {
+            'statussync': 'telegram.features.statusSync',
+            'autoupdatecontactnames': 'telegram.features.autoUpdateContactNames',
+            'autoupdatetopicnames': 'telegram.features.autoUpdateTopicNames',
+            'replysupport': 'telegram.features.replySupport',
+            'profilepicsync': 'telegram.features.profilePicSync',
+            'topics': 'telegram.features.topics',
+            'mediasync': 'telegram.features.mediaSync'
+        };
+
+        const configPath = settingMap[setting];
+        config.set(configPath, value);
+
+        const updateText = `✅ *Bridge Config Updated*\n\n⚙️ Setting: ${setting}\n🔧 Value: ${value ? 'Enabled' : 'Disabled'}\n⏰ ${new Date().toLocaleTimeString()}`;
+        await context.bot.sendMessage(context.sender, { text: updateText });
+
+        if (this.bot.telegramBridge) {
+            await this.bot.telegramBridge.logToTelegram('⚙️ Bridge Config Updated', 
+                `Setting: ${setting}\nValue: ${value ? 'Enabled' : 'Disabled'}`);
+        }
+
+        this.incrementCommandCount('bridgeconfig');
     }
 
     getUptime() {
