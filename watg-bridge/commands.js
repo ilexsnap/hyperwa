@@ -67,7 +67,7 @@ class TelegramCommands {
             `Linked Chats: ${this.bridge.chatMappings.size}\n` +
             `Contacts: ${this.bridge.contactMappings.size}\n` +
             `Users: ${this.bridge.userMappings.size}\n\n` +
-            `Use /settings to configure the bot`;
+            `Use /settings to configure the bridge`;
         await this.bridge.telegramBot.sendMessage(chatId, welcome, { parse_mode: 'Markdown' });
     }
 
@@ -78,12 +78,12 @@ class TelegramCommands {
             `💬 Chats: ${this.bridge.chatMappings.size}\n` +
             `👥 Users: ${this.bridge.userMappings.size}\n` +
             `📞 Contacts: ${this.bridge.contactMappings.size}\n\n` +
-            `🔧 *Features Status:*\n` +
-            `• Status Sync: ${config.get('telegram.features.statusSync') ? '✅' : '❌'}\n` +
-            `• Profile Pic Sync: ${config.get('telegram.features.profilePicSync') ? '✅' : '❌'}\n` +
-            `• Auto Update Contacts: ${config.get('telegram.features.autoUpdateContactNames') ? '✅' : '❌'}\n` +
-            `• Auto Update Topics: ${config.get('telegram.features.autoUpdateTopicNames') ? '✅' : '❌'}\n` +
-            `• Read Receipts: ${config.get('telegram.features.readReceipts') ? '✅' : '❌'}`;
+            `🎛️ *Feature Status:*\n` +
+            `• 📊 Status Sync: ${config.get('telegram.features.statusSync') ? '✅' : '❌'}\n` +
+            `• 📸 Profile Pic Sync: ${config.get('telegram.features.profilePicSync') ? '✅' : '❌'}\n` +
+            `• 🔄 Auto Update Contacts: ${config.get('telegram.features.autoUpdateContactNames') ? '✅' : '❌'}\n` +
+            `• 📝 Auto Update Topics: ${config.get('telegram.features.autoUpdateTopicNames') ? '✅' : '❌'}\n` +
+            `• 📞 Call Logs: ${config.get('telegram.features.callLogs') ? '✅' : '❌'}`;
         await this.bridge.telegramBot.sendMessage(chatId, status, { parse_mode: 'Markdown' });
     }
 
@@ -112,9 +112,9 @@ class TelegramCommands {
     async handleSync(chatId) {
         await this.bridge.telegramBot.sendMessage(chatId, '🔄 Syncing contacts...', { parse_mode: 'Markdown' });
         try {
-            const result = await this.bridge.syncContacts();
+            await this.bridge.syncContacts();
             await this.bridge.telegramBot.sendMessage(chatId,
-                `✅ Synced ${result.synced} new contacts (Total: ${result.total})`,
+                `✅ Synced contacts from WhatsApp (Total: ${this.bridge.contactMappings.size})`,
                 { parse_mode: 'Markdown' });
         } catch (error) {
             await this.bridge.telegramBot.sendMessage(chatId, `❌ Failed to sync: ${error.message}`, { parse_mode: 'Markdown' });
@@ -230,7 +230,8 @@ class TelegramCommands {
             `• 📝 Auto Update Topics: ${config.get('telegram.features.autoUpdateTopicNames') ? '✅' : '❌'}\n` +
             `• 📖 Read Receipts: ${config.get('telegram.features.readReceipts') ? '✅' : '❌'}\n` +
             `• 👁️ Presence Updates: ${config.get('telegram.features.presenceUpdates') ? '✅' : '❌'}\n` +
-            `• 🔄 Bi-Directional: ${config.get('telegram.features.biDirectional') ? '✅' : '❌'}\n\n` +
+            `• 🔄 Bi-Directional: ${config.get('telegram.features.biDirectional') ? '✅' : '❌'}\n` +
+            `• 📞 Call Logs: ${config.get('telegram.features.callLogs') ? '✅' : '❌'}\n\n` +
             `⚙️ *Management Commands:*\n` +
             `• /updatetopics - Update all topic names\n` +
             `• /sync - Sync WhatsApp contacts\n` +
@@ -250,7 +251,8 @@ class TelegramCommands {
                 `• autoUpdateTopicNames - Auto update topic names\n` +
                 `• readReceipts - Send read receipts\n` +
                 `• presenceUpdates - Send presence updates\n` +
-                `• biDirectional - Enable bi-directional messaging\n\n` +
+                `• biDirectional - Enable bi-directional messaging\n` +
+                `• callLogs - Enable call notifications\n\n` +
                 `📝 *Examples:*\n` +
                 `• /config statusSync true\n` +
                 `• /config profilePicSync false\n` +
@@ -277,7 +279,8 @@ class TelegramCommands {
             'autoUpdateTopicNames',
             'readReceipts',
             'presenceUpdates',
-            'biDirectional'
+            'biDirectional',
+            'callLogs'
         ];
 
         if (!validFeatures.includes(feature)) {
