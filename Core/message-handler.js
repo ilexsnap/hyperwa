@@ -177,23 +177,21 @@ if (!this.checkPermissions(msg, command)) {
 checkPermissions(msg, commandName) {
     const participant = msg.key.participant || msg.key.remoteJid;
     const userId = participant.split('@')[0];
-    const ownerId = config.get('bot.owner');
-    const isOwner = participant === ownerId || msg.key.fromMe;
+    const ownerId = config.get('bot.owner').split('@')[0]; // Convert full JID to userId
+    const isOwner = userId === ownerId || msg.key.fromMe;
 
-    // Mode restriction
+    const admins = config.get('bot.admins') || [];
+
     const mode = config.get('features.mode');
-    if (mode === 'private' && !isOwner) return false;
+    if (mode === 'private' && !isOwner && !admins.includes(userId)) return false;
 
-    // Blocked users
     const blockedUsers = config.get('security.blockedUsers') || [];
     if (blockedUsers.includes(userId)) return false;
 
-    // Command-specific permission
     const handler = this.commandHandlers.get(commandName);
     if (!handler) return false;
 
     const permission = handler.permissions || 'public';
-    const admins = config.get('bot.admins') || [];
 
     switch (permission) {
         case 'owner':
@@ -212,6 +210,7 @@ checkPermissions(msg, commandName) {
             return false;
     }
 }
+
 
     extractText(msg) {
         return msg.message?.conversation || 
