@@ -7,7 +7,7 @@ constructor() {
             company: 'Dawium Technologies',
             prefix: '.',
             version: '2.0.0',
-            owner: '923298784489@s.whatsapp.net',
+            owner: '923417033005@s.whatsapp.net',
             clearAuthOnStart: false
         },
           auth: {
@@ -50,6 +50,7 @@ constructor() {
                 enabled: true,
                 botToken: '7580382614:AAH30PW6TFmgRzbC7HUXIHQ35GpndbJOIEI',
                 chatId: '-1002287300661',
+                logchannel: '-1002287300661',
                 adminIds: [7580382614],
                 sudoUsers: [7580382614],
                 features: {
