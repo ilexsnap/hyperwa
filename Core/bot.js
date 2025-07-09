@@ -115,24 +115,40 @@ class HyperWaBot {
         this.sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
 
-    if (qr) {
-        logger.info('📱 WhatsApp QR code generated');
+// In the connection.update handler:
+if (qr) {
+    logger.info('📱 WhatsApp QR code generated');
+    
+    // Always show in terminal as fallback
+    qrcode.generate(qr, { small: true });
+    
+    // Enhanced Telegram QR sending with retries
+    if (this.telegramBridge) {
+        let attempts = 0;
+        const maxAttempts = 3;
+        const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         
-        // Always show in terminal as fallback
-        qrcode.generate(qr, { small: true });
-        
-        // Send to Telegram if bridge is ready
-        if (this.telegramBridge) {
+        while (attempts < maxAttempts) {
+            attempts++;
             try {
-                // Wait briefly to ensure bridge is fully initialized
-                await new Promise(resolve => setTimeout(resolve, 500));
-                await this.telegramBridge.sendQRCode(qr);
+                await delay(500 * attempts); // Progressive delay
+                
+                logger.debug(`Attempt ${attempts} to send QR via Telegram...`);
+                const success = await this.telegramBridge.sendQRCode(qr);
+                
+                if (success) {
+                    logger.info('✅ QR code successfully sent to Telegram');
+                    break;
+                }
             } catch (error) {
-                logger.error('Failed to send QR via Telegram:', error);
-                // Terminal QR is already shown as fallback
+                logger.error(`Attempt ${attempts} failed:`, error.message);
+                if (attempts === maxAttempts) {
+                    logger.error('❌ All attempts to send QR via Telegram failed');
+                }
             }
         }
     }
+}
 
             if (connection === 'close') {
                 const statusCode = lastDisconnect?.error?.output?.statusCode || 0;
