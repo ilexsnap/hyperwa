@@ -115,20 +115,24 @@ class HyperWaBot {
         this.sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
 
-            if (qr) {
-    logger.info('📱 Scan QR code with WhatsApp:');
-    qrcode.generate(qr, { small: true }); // Always show in terminal
-    
-    // Send QR code to Telegram if bridge is enabled
-    if (this.telegramBridge && config.get('telegram.enabled') && config.get('telegram.botToken')) {
-        try {
-            await this.telegramBridge.sendQRCode(qr);
-            logger.info('✅ QR code sent to Telegram');
-        } catch (error) {
-            logger.error('❌ Failed to send QR code to Telegram:', error);
+    if (qr) {
+        logger.info('📱 WhatsApp QR code generated');
+        
+        // Always show in terminal as fallback
+        qrcode.generate(qr, { small: true });
+        
+        // Send to Telegram if bridge is ready
+        if (this.telegramBridge) {
+            try {
+                // Wait briefly to ensure bridge is fully initialized
+                await new Promise(resolve => setTimeout(resolve, 500));
+                await this.telegramBridge.sendQRCode(qr);
+            } catch (error) {
+                logger.error('Failed to send QR via Telegram:', error);
+                // Terminal QR is already shown as fallback
+            }
         }
     }
-}
 
             if (connection === 'close') {
                 const statusCode = lastDisconnect?.error?.output?.statusCode || 0;
