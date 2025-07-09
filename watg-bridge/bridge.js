@@ -380,10 +380,37 @@ class TelegramBridge {
         }
     }
 
+async ensureBridgeReady() {
+    if (!this.telegramBot) {
+        throw new Error('Telegram bot not initialized');
+    }
+    
+    // Verify we can actually send messages
+    try {
+        await this.telegramBot.getMe();
+        return true;
+    } catch (error) {
+        logger.error('Telegram bot not functional:', error);
+        return false;
+    }
+}
+
 async sendQRCode(qrCode) {
     try {
-        if (!this.telegramBot) return;
+        if (!await this.ensureBridgeReady()) {
+            logger.warn('⚠️ Telegram bridge not ready for QR code');
+            return;
+        }
 
+        const chatId = config.get('telegram.chatId');
+        const logChannel = config.get('telegram.logChannel');
+        
+        if (!chatId || chatId.includes('YOUR_CHAT_ID')) {
+            logger.warn('⚠️ Telegram chat ID not configured for QR code');
+            return;
+        }
+
+        logger.debug('📱 Preparing to send QR code to Telegram');
         const qrcode = require('qrcode');
         const qrBuffer = await qrcode.toBuffer(qrCode, {
             type: 'png',
@@ -391,36 +418,33 @@ async sendQRCode(qrCode) {
             margin: 2
         });
 
-        const chatId = config.get('telegram.chatId');        // bot's main chat
-        const logChannel = config.get('telegram.logChannel'); // configured log channel
-
-        const caption = '📱 *Scan QR Code to Login to WhatsApp*\n\nScan this QR code with your WhatsApp mobile app to connect.';
-
-        // ✅ Send to main bot chat (your own chat with the bot)
-        if (chatId && !chatId.includes('YOUR_CHAT_ID')) {
+        // Send to main chat
+        try {
             await this.telegramBot.sendPhoto(chatId, qrBuffer, {
-                caption,
+                caption: '📱 *Scan QR Code to Login to WhatsApp*',
                 parse_mode: 'Markdown'
             });
+            logger.info('✅ QR code sent to main Telegram chat');
+        } catch (error) {
+            logger.error('❌ Failed to send QR to main chat:', error);
         }
 
-        // ✅ Also send to log channel if set
-        if (logChannel && !logChannel.includes('YOUR_LOG_CHANNEL')) {
-            await this.telegramBot.sendPhoto(logChannel, qrBuffer, {
-                caption: '📱 *WhatsApp QR Code Generated*\n\nWaiting for scan...',
-                parse_mode: 'Markdown'
-            });
+        // Send to log channel if different
+        if (logChannel && logChannel !== chatId) {
+            try {
+                await this.telegramBot.sendPhoto(logChannel, qrBuffer, {
+                    caption: '📱 *WhatsApp QR Code Generated*',
+                    parse_mode: 'Markdown'
+                });
+                logger.info('✅ QR code sent to Telegram log channel');
+            } catch (error) {
+                logger.error('❌ Failed to send QR to log channel:', error);
+            }
         }
-
-        logger.info('📱 QR code sent to bot chat and log channel');
-
-        // Optional: Sync contacts after scan window
-        setTimeout(async () => {
-            await this.syncContacts();
-        }, 10000);
 
     } catch (error) {
-        logger.error('❌ Failed to send QR code to Telegram:', error);
+        logger.error('❌ QR code sending failed:', error);
+        throw error;
     }
 }
 
