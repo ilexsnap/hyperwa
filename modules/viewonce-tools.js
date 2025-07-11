@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
-const { tmpdir } = require('os');
 const logger = require('../logger');
 const config = require('../../config');
 
