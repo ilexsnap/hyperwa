@@ -1,8 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
-const { tmpdir } = require('os');
-const logger = require('../logger');
 const config = require('../../config');
 
 class ViewOnceToolsModule {
@@ -10,7 +7,7 @@ class ViewOnceToolsModule {
         this.bot = bot;
         this.name = 'viewonce';
         this.metadata = {
-            description: 'Tools for handling viewonce messages.',
+            description: 'Tools for handling viewonce messages (images and videos).',
             version: '1.0.0',
             author: 'Your Name',
             category: 'utility'
@@ -21,11 +18,11 @@ class ViewOnceToolsModule {
                 description: 'Reveal viewonce messages by replying to them.',
                 usage: '.rvo (reply to a viewonce message)',
                 permissions: 'public',
-                execute: this.rvoCommand.bind(this),
                 ui: {
                     processingText: '🔍 Revealing viewonce message...',
                     errorText: '❌ Failed to reveal viewonce message.'
-                }
+                },
+                execute: this.rvoCommand.bind(this)
             }
         ];
         this.messageHooks = {
@@ -34,13 +31,11 @@ class ViewOnceToolsModule {
     }
 
     async init() {
-        logger.info('🔧 Initializing ViewOnce Tools Module...');
-        logger.info('✅ ViewOnce Tools Module initialized');
+        console.log('ViewOnce Tools Module initialized');
     }
 
     async destroy() {
-        logger.info('🗑️ Destroying ViewOnce Tools Module...');
-        logger.info('✅ ViewOnce Tools Module destroyed');
+        console.log('ViewOnce Tools Module destroyed');
     }
 
     async rvoCommand(msg, params, context) {
@@ -65,11 +60,9 @@ class ViewOnceToolsModule {
             await this.handleViewOnceImage(viewOnceContent.imageMessage, context);
         } else if (viewOnceContent.videoMessage) {
             await this.handleViewOnceVideo(viewOnceContent.videoMessage, context);
-        } else if (viewOnceContent.audioMessage) {
-            await this.handleViewOnceAudio(viewOnceContent.audioMessage, context);
         } else {
             await context.bot.sendMessage(context.sender, {
-                text: '❌ Unsupported viewonce message type.'
+                text: '❌ Unsupported viewonce message type (only images and videos supported).'
             });
         }
     }
@@ -98,20 +91,6 @@ class ViewOnceToolsModule {
         });
     }
 
-    async handleViewOnceAudio(audioMessage, context) {
-        const audioBuffer = await this.downloadMedia(audioMessage);
-        if (!audioBuffer) {
-            throw new Error('Failed to download audio');
-        }
-
-        const processedAudio = await this.processAudio(audioBuffer);
-
-        await context.bot.sendMessage(context.sender, {
-            audio: processedAudio,
-            caption: '🔍 ViewOnce Audio Revealed'
-        });
-    }
-
     async downloadMedia(mediaMessage) {
         try {
             const stream = await this.bot.sock.downloadMediaMessage({
@@ -119,7 +98,7 @@ class ViewOnceToolsModule {
             });
             return stream;
         } catch (error) {
-            logger.error('Error downloading media:', error);
+            console.error('Error downloading media:', error);
             return null;
         }
     }
@@ -127,41 +106,19 @@ class ViewOnceToolsModule {
     getMessageType(message) {
         if (message.imageMessage) return 'imageMessage';
         if (message.videoMessage) return 'videoMessage';
-        if (message.audioMessage) return 'audioMessage';
-        if (message.documentMessage) return 'documentMessage';
         return 'unknown';
     }
 
-    async processAudio(audioBuffer) {
-        return new Promise((resolve, reject) => {
-            const inputPath = path.join(tmpdir(), `audio_${Date.now()}.ogg`);
-            const outputPath = path.join(tmpdir(), `audio_${Date.now()}.mp3`);
-
-            fs.writeFileSync(inputPath, audioBuffer);
-
-            exec(`ffmpeg -i ${inputPath} -vn -ar 44100 -ac 2 -b:a 128k ${outputPath}`, (error, stdout, stderr) => {
-                fs.unlinkSync(inputPath);
-
-                if (error) {
-                    logger.error('FFmpeg error:', error);
-                    resolve(audioBuffer);
-                    return;
-                }
-
-                try {
-                    const convertedBuffer = fs.readFileSync(outputPath);
-                    fs.unlinkSync(outputPath);
-                    resolve(convertedBuffer);
-                } catch (readError) {
-                    logger.error('Error reading converted audio:', readError);
-                    resolve(audioBuffer);
-                }
-            });
-        });
-    }
-
     async handleAutoViewOnce(msg) {
-        if (!config.get('features.autoRevealViewOnce', false)) {
+        let autoReveal;
+        try {
+            autoReveal = config.get('features.autoRevealViewOnce', false);
+        } catch (error) {
+            console.error('Error accessing config:', error);
+            return;
+        }
+
+        if (!autoReveal) {
             return;
         }
 
@@ -172,11 +129,19 @@ class ViewOnceToolsModule {
         const sender = msg.key.remoteJid;
         const isGroup = sender.endsWith('@g.us');
 
-        if (isGroup && !config.get('features.autoRevealViewOnceInGroups', false)) {
+        let autoRevealInGroups;
+        try {
+            autoRevealInGroups = config.get('features.autoRevealViewOnceInGroups', false);
+        } catch (error) {
+            console.error('Error accessing config:', error);
             return;
         }
 
-        logger.info(`🔍 Auto-revealing viewonce message from ${msg.key.participant || sender}`);
+        if (isGroup && !autoRevealInGroups) {
+            return;
+        }
+
+        console.log(`Auto-revealing viewonce message from ${msg.key.participant || sender}`);
 
         if (content.imageMessage) {
             const imageBuffer = await this.downloadMedia(content.imageMessage);
