@@ -1,43 +1,43 @@
+
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const { tmpdir } = require('os');
-const logger = require('../Core/logger');
+const axios = require('axios');
+const FormData = require('form-data');
+const logger = require('../Core//logger');
 const config = require('../config');
+
 class ViewOnceToolsModule {
     constructor(bot) {
         this.bot = bot;
         this.name = 'viewonce-tools';
-        
-        // Module metadata required by the loader
-        this.metadata = {
-            description: 'Tools for revealing viewonce messages',
-            version: '1.0.0',
-            author: 'Bot Developer',
-            category: 'Media Tools',
-            dependencies: []
-        };
-
-        // Commands array required by the loader
-        this.commands = [
-            {
-                name: 'rvo',
-                description: 'Reveal viewonce messages by replying to them',
-                usage: '.rvo (reply to viewonce message)',
-                permissions: 'public',
-                execute: this.rvoCommand.bind(this)
-            }
-        ];
-
-        // Message hooks for auto-reveal feature
-        this.messageHooks = {
-            'message.any': this.handleAutoViewOnce.bind(this)
-        };
     }
 
-    // Initialize method called by the loader
-    async init() {
+    async initialize() {
         logger.info('🔧 Initializing ViewOnce Tools Module...');
+        
+        // Register RVO command
+        this.bot.messageHandler.registerCommandHandler('rvo', {
+            execute: this.rvoCommand.bind(this),
+            permissions: 'public',
+            description: 'Reveal viewonce messages by replying to them'
+        });
+
+        // Register Remini command  
+        this.bot.messageHandler.registerCommandHandler('remini', {
+            execute: this.reminiCommand.bind(this),
+            permissions: 'public',
+            description: 'Enhance image quality using AI'
+        });
+
+        // Register enhance command (alias for remini)
+        this.bot.messageHandler.registerCommandHandler('enhance', {
+            execute: this.reminiCommand.bind(this),
+            permissions: 'public',
+            description: 'Enhance image quality using AI'
+        });
+
         logger.info('✅ ViewOnce Tools Module initialized');
     }
 
@@ -47,103 +47,124 @@ class ViewOnceToolsModule {
             const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
             
             if (!quotedMsg) {
-                return await context.bot.sendMessage(context.sender, {
-                    text: '❌ *RVO - Reveal ViewOnce*\n\n🔍 Please reply to a viewonce message to reveal it.\n\n💡 *How to use:*\n1. Reply to any viewonce message\n2. Type `.rvo`\n3. Get the revealed content!'
+                return this.bot.sendMessage(context.sender, {
+                    text: '❌ Please reply to a viewonce message to reveal it.'
                 });
             }
 
             // Check if quoted message is viewonce
             const isViewOnce = quotedMsg.viewOnceMessage || quotedMsg.viewOnceMessageV2;
             if (!isViewOnce) {
-                return await context.bot.sendMessage(context.sender, {
-                    text: '❌ *Invalid Message*\n\n🚫 The replied message is not a viewonce message.\n\n💡 ViewOnce messages are those that disappear after being viewed once.'
+                return this.bot.sendMessage(context.sender, {
+                    text: '❌ The replied message is not a viewonce message.'
                 });
             }
 
-            const processingMsg = await context.bot.sendMessage(context.sender, {
-                text: '🔍 *Revealing ViewOnce Message*\n\n⏳ Processing...\n🔄 Downloading content...'
+            await this.bot.sendMessage(context.sender, {
+                text: '🔍 Revealing viewonce message...'
             });
 
             // Extract the actual message from viewonce
             const viewOnceContent = quotedMsg.viewOnceMessage?.message || quotedMsg.viewOnceMessageV2?.message;
             
             if (viewOnceContent.imageMessage) {
-                await this.handleViewOnceImage(viewOnceContent.imageMessage, context, processingMsg);
+                await this.handleViewOnceImage(viewOnceContent.imageMessage, context);
             } else if (viewOnceContent.videoMessage) {
-                await this.handleViewOnceVideo(viewOnceContent.videoMessage, context, processingMsg);
+                await this.handleViewOnceVideo(viewOnceContent.videoMessage, context);
             } else if (viewOnceContent.audioMessage) {
-                await this.handleViewOnceAudio(viewOnceContent.audioMessage, context, processingMsg);
+                await this.handleViewOnceAudio(viewOnceContent.audioMessage, context);
             } else {
-                await context.bot.sock.sendMessage(context.sender, {
-                    text: '❌ *Unsupported Content*\n\n🚫 This viewonce message type is not supported.\n\n📱 Supported types: Images, Videos, Audio',
-                    edit: processingMsg.key
+                await this.bot.sendMessage(context.sender, {
+                    text: '❌ Unsupported viewonce message type.'
                 });
             }
 
         } catch (error) {
             logger.error('Error in RVO command:', error);
-            await context.bot.sendMessage(context.sender, {
-                text: `❌ *RVO Failed*\n\n🚫 Error: ${error.message}\n\n🔧 Please try again or contact support if the issue persists.`
+            await this.bot.sendMessage(context.sender, {
+                text: '❌ Failed to reveal viewonce message: ' + error.message
+            });
+        }
+    }
+
+    // Remini Command - AI Image Enhancement
+    async reminiCommand(msg, params, context) {
+        try {
+            const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            
+            if (!quotedMsg || !quotedMsg.imageMessage) {
+                return this.bot.sendMessage(context.sender, {
+                    text: '❌ Please reply to an image to enhance it.'
+                });
+            }
+
+            await this.bot.sendMessage(context.sender, {
+                text: '🎨 Enhancing image quality... This may take a moment.'
+            });
+
+            // Download the image
+            const imageBuffer = await this.downloadMedia(quotedMsg.imageMessage);
+            if (!imageBuffer) {
+                throw new Error('Failed to download image');
+            }
+
+            // Upload and enhance image
+            const enhancedImageUrl = await this.enhanceImage(imageBuffer);
+            
+            // Send enhanced image
+            await this.bot.sendMessage(context.sender, {
+                image: { url: enhancedImageUrl },
+                caption: '✨ Image enhanced successfully!'
+            });
+
+        } catch (error) {
+            logger.error('Error in Remini command:', error);
+            await this.bot.sendMessage(context.sender, {
+                text: '❌ Failed to enhance image: ' + error.message
             });
         }
     }
 
     // Handle ViewOnce Image
-    async handleViewOnceImage(imageMessage, context, processingMsg) {
+    async handleViewOnceImage(imageMessage, context) {
         try {
             const imageBuffer = await this.downloadMedia(imageMessage);
             if (!imageBuffer) {
                 throw new Error('Failed to download image');
             }
 
-            await context.bot.sock.sendMessage(context.sender, {
+            await this.bot.sendMessage(context.sender, {
                 image: imageBuffer,
-                caption: '🔍 *ViewOnce Image Revealed*\n\n✅ Successfully revealed the hidden image!\n⏰ ' + new Date().toLocaleTimeString()
-            });
-
-            // Delete processing message
-            await context.bot.sock.sendMessage(context.sender, {
-                delete: processingMsg.key
+                caption: '🔍 ViewOnce Image Revealed'
             });
 
         } catch (error) {
             logger.error('Error handling viewonce image:', error);
-            await context.bot.sock.sendMessage(context.sender, {
-                text: `❌ *Image Reveal Failed*\n\n🚫 Error: ${error.message}\n\n🔧 The image could not be downloaded or processed.`,
-                edit: processingMsg.key
-            });
+            throw error;
         }
     }
 
     // Handle ViewOnce Video
-    async handleViewOnceVideo(videoMessage, context, processingMsg) {
+    async handleViewOnceVideo(videoMessage, context) {
         try {
             const videoBuffer = await this.downloadMedia(videoMessage);
             if (!videoBuffer) {
                 throw new Error('Failed to download video');
             }
 
-            await context.bot.sock.sendMessage(context.sender, {
+            await this.bot.sendMessage(context.sender, {
                 video: videoBuffer,
-                caption: '🔍 *ViewOnce Video Revealed*\n\n✅ Successfully revealed the hidden video!\n⏰ ' + new Date().toLocaleTimeString()
-            });
-
-            // Delete processing message
-            await context.bot.sock.sendMessage(context.sender, {
-                delete: processingMsg.key
+                caption: '🔍 ViewOnce Video Revealed'
             });
 
         } catch (error) {
             logger.error('Error handling viewonce video:', error);
-            await context.bot.sock.sendMessage(context.sender, {
-                text: `❌ *Video Reveal Failed*\n\n🚫 Error: ${error.message}\n\n🔧 The video could not be downloaded or processed.`,
-                edit: processingMsg.key
-            });
+            throw error;
         }
     }
 
     // Handle ViewOnce Audio
-    async handleViewOnceAudio(audioMessage, context, processingMsg) {
+    async handleViewOnceAudio(audioMessage, context) {
         try {
             const audioBuffer = await this.downloadMedia(audioMessage);
             if (!audioBuffer) {
@@ -153,51 +174,37 @@ class ViewOnceToolsModule {
             // Convert audio if needed
             const processedAudio = await this.processAudio(audioBuffer);
 
-            await context.bot.sock.sendMessage(context.sender, {
+            await this.bot.sendMessage(context.sender, {
                 audio: processedAudio,
-                mimetype: 'audio/mpeg',
-                caption: '🔍 *ViewOnce Audio Revealed*\n\n✅ Successfully revealed the hidden audio!\n⏰ ' + new Date().toLocaleTimeString()
-            });
-
-            // Delete processing message
-            await context.bot.sock.sendMessage(context.sender, {
-                delete: processingMsg.key
+                caption: '🔍 ViewOnce Audio Revealed'
             });
 
         } catch (error) {
             logger.error('Error handling viewonce audio:', error);
-            await context.bot.sock.sendMessage(context.sender, {
-                text: `❌ *Audio Reveal Failed*\n\n🚫 Error: ${error.message}\n\n🔧 The audio could not be downloaded or processed.`,
-                edit: processingMsg.key
-            });
+            throw error;
         }
     }
 
     // Download media from WhatsApp
     async downloadMedia(mediaMessage) {
         try {
-            const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-            
-            // Determine message type
-            let messageType;
-            if (mediaMessage.imageMessage) messageType = 'image';
-            else if (mediaMessage.videoMessage) messageType = 'video';
-            else if (mediaMessage.audioMessage) messageType = 'audio';
-            else if (mediaMessage.documentMessage) messageType = 'document';
-            else throw new Error('Unknown media type');
-
-            const stream = await downloadContentFromMessage(mediaMessage, messageType);
-            
-            const chunks = [];
-            for await (const chunk of stream) {
-                chunks.push(chunk);
-            }
-            
-            return Buffer.concat(chunks);
+            const stream = await this.bot.sock.downloadMediaMessage({
+                message: { [this.getMessageType(mediaMessage)]: mediaMessage }
+            });
+            return stream;
         } catch (error) {
             logger.error('Error downloading media:', error);
             return null;
         }
+    }
+
+    // Get message type
+    getMessageType(message) {
+        if (message.imageMessage) return 'imageMessage';
+        if (message.videoMessage) return 'videoMessage';
+        if (message.audioMessage) return 'audioMessage';
+        if (message.documentMessage) return 'documentMessage';
+        return 'unknown';
     }
 
     // Process audio (convert if needed)
@@ -206,45 +213,92 @@ class ViewOnceToolsModule {
             const inputPath = path.join(tmpdir(), `audio_${Date.now()}.ogg`);
             const outputPath = path.join(tmpdir(), `audio_${Date.now()}.mp3`);
 
-            try {
-                // Write buffer to temp file
-                fs.writeFileSync(inputPath, audioBuffer);
+            // Write buffer to temp file
+            fs.writeFileSync(inputPath, audioBuffer);
 
-                // Convert using ffmpeg if available
-                exec(`ffmpeg -i "${inputPath}" -vn -ar 44100 -ac 2 -b:a 128k "${outputPath}"`, (error, stdout, stderr) => {
-                    // Clean up input file
-                    try {
-                        fs.unlinkSync(inputPath);
-                    } catch (cleanupError) {
-                        logger.warn('Failed to cleanup input file:', cleanupError);
-                    }
+            // Convert using ffmpeg
+            exec(`ffmpeg -i ${inputPath} -vn -ar 44100 -ac 2 -b:a 128k ${outputPath}`, (error, stdout, stderr) => {
+                // Clean up input file
+                fs.unlinkSync(inputPath);
 
-                    if (error) {
-                        logger.warn('FFmpeg not available or conversion failed, returning original audio');
-                        resolve(audioBuffer);
-                        return;
-                    }
+                if (error) {
+                    logger.error('FFmpeg error:', error);
+                    resolve(audioBuffer); // Return original if conversion fails
+                    return;
+                }
 
-                    try {
-                        const convertedBuffer = fs.readFileSync(outputPath);
-                        fs.unlinkSync(outputPath);
-                        resolve(convertedBuffer);
-                    } catch (readError) {
-                        logger.warn('Error reading converted audio, returning original');
-                        resolve(audioBuffer);
-                    }
-                });
-            } catch (writeError) {
-                logger.warn('Error writing audio file, returning original');
-                resolve(audioBuffer);
-            }
+                try {
+                    const convertedBuffer = fs.readFileSync(outputPath);
+                    fs.unlinkSync(outputPath); // Clean up output file
+                    resolve(convertedBuffer);
+                } catch (readError) {
+                    logger.error('Error reading converted audio:', readError);
+                    resolve(audioBuffer); // Return original if read fails
+                }
+            });
         });
     }
 
-    // Auto ViewOnce Handler (called from message hooks)
+    // Upload image to external service and enhance
+    async enhanceImage(imageBuffer) {
+        try {
+            // First upload the image
+            const uploadUrl = await this.uploadImage(imageBuffer);
+            
+            // Then enhance it using API
+            const apiKey = config.get('api.neoxrKey') || 'demo'; // Add to config
+            const response = await axios.post('https://api.neoxr.my.id/api/remini', {
+                image: uploadUrl
+            }, {
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.data.status) {
+                throw new Error('Enhancement API failed');
+            }
+
+            return response.data.data.url;
+
+        } catch (error) {
+            logger.error('Error enhancing image:', error);
+            throw new Error('Image enhancement service unavailable');
+        }
+    }
+
+    // Upload image to temporary hosting
+    async uploadImage(imageBuffer) {
+        try {
+            const formData = new FormData();
+            formData.append('file', imageBuffer, {
+                filename: 'image.jpg',
+                contentType: 'image/jpeg'
+            });
+
+            // Using a free image hosting service (you can replace with your preferred service)
+            const response = await axios.post('https://tmpfiles.org/api/v1/upload', formData, {
+                headers: {
+                    ...formData.getHeaders()
+                }
+            });
+
+            if (response.data && response.data.data && response.data.data.url) {
+                return response.data.data.url;
+            }
+
+            throw new Error('Upload failed');
+
+        } catch (error) {
+            logger.error('Error uploading image:', error);
+            throw new Error('Image upload failed');
+        }
+    }
+
+    // Auto ViewOnce Handler (called from message handler)
     async handleAutoViewOnce(msg) {
         try {
-            // Check if auto-reveal is enabled
             if (!config.get('features.autoRevealViewOnce', false)) {
                 return;
             }
@@ -268,7 +322,7 @@ class ViewOnceToolsModule {
                 if (imageBuffer) {
                     await this.bot.sendMessage(sender, {
                         image: imageBuffer,
-                        caption: '🔍 *ViewOnce Image Auto-Revealed*\n\n✅ Automatically revealed by bot\n⏰ ' + new Date().toLocaleTimeString()
+                        caption: '🔍 ViewOnce Image Auto-Revealed'
                     });
                 }
             } else if (content.videoMessage) {
@@ -276,17 +330,7 @@ class ViewOnceToolsModule {
                 if (videoBuffer) {
                     await this.bot.sendMessage(sender, {
                         video: videoBuffer,
-                        caption: '🔍 *ViewOnce Video Auto-Revealed*\n\n✅ Automatically revealed by bot\n⏰ ' + new Date().toLocaleTimeString()
-                    });
-                }
-            } else if (content.audioMessage) {
-                const audioBuffer = await this.downloadMedia(content.audioMessage);
-                if (audioBuffer) {
-                    const processedAudio = await this.processAudio(audioBuffer);
-                    await this.bot.sendMessage(sender, {
-                        audio: processedAudio,
-                        mimetype: 'audio/mpeg',
-                        caption: '🔍 *ViewOnce Audio Auto-Revealed*\n\n✅ Automatically revealed by bot\n⏰ ' + new Date().toLocaleTimeString()
+                        caption: '🔍 ViewOnce Video Auto-Revealed'
                     });
                 }
             }
@@ -294,11 +338,6 @@ class ViewOnceToolsModule {
         } catch (error) {
             logger.error('Error in auto viewonce handler:', error);
         }
-    }
-
-    // Destroy method called when module is unloaded
-    async destroy() {
-        logger.info('🚫 ViewOnce Tools Module destroyed');
     }
 }
 
