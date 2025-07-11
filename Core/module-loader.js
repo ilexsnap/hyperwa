@@ -335,87 +335,203 @@ class ModuleLoader {
         const moduleId = path.basename(filePath, '.js');
 
         try {
+            // Clear require cache first
             delete require.cache[require.resolve(filePath)];
-            const mod = require(filePath);
+            
+            logger.info(`🔄 Loading module: ${moduleId} from ${filePath}`);
+            
+            // Try to require the module
+            let mod;
+            try {
+                mod = require(filePath);
+                logger.info(`✅ Module file loaded successfully: ${moduleId}`);
+            } catch (requireError) {
+                logger.error(`❌ Failed to require module file '${moduleId}':`, requireError);
+                logger.error(`❌ Require error details:`, {
+                    message: requireError.message,
+                    code: requireError.code,
+                    path: requireError.path,
+                    stack: requireError.stack
+                });
+                throw requireError;
+            }
 
-            const moduleInstance = typeof mod === 'function' && /^\s*class\s/.test(mod.toString()) 
-                                   ? new mod(this.bot) 
-                                   : mod;
+            // Try to instantiate the module
+            let moduleInstance;
+            try {
+                moduleInstance = typeof mod === 'function' && /^\s*class\s/.test(mod.toString()) 
+                               ? new mod(this.bot) 
+                               : mod;
+                logger.info(`✅ Module instantiated successfully: ${moduleId}`);
+            } catch (instantiationError) {
+                logger.error(`❌ Failed to instantiate module '${moduleId}':`, instantiationError);
+                logger.error(`❌ Instantiation error details:`, {
+                    message: instantiationError.message,
+                    stack: instantiationError.stack,
+                    moduleType: typeof mod,
+                    isClass: /^\s*class\s/.test(mod.toString())
+                });
+                throw instantiationError;
+            }
 
             const actualModuleId = (moduleInstance && moduleInstance.name) ? moduleInstance.name : moduleId;
+            logger.info(`🔍 Module ID determined: ${actualModuleId}`);
 
-            // Validate module structure
-            if (!moduleInstance.metadata) {
-                moduleInstance.metadata = {
-                    description: 'No description provided',
-                    version: 'Unknown',
-                    author: 'Unknown',
-                    category: 'Uncategorized',
-                    dependencies: []
-                };
-            }
-
-            if (moduleInstance.init && typeof moduleInstance.init === 'function') {
-                await moduleInstance.init();
-            }
-
-            if (Array.isArray(moduleInstance.commands)) {
-                for (const cmd of moduleInstance.commands) {
-                    if (!cmd.name || !cmd.description || !cmd.usage || !cmd.execute) {
-                        logger.warn(`⚠️ Invalid command in module ${actualModuleId}: ${JSON.stringify(cmd)}`);
-                        continue;
-                    }
-
-                    const ui = cmd.ui || {};
-
-                    const wrappedCmd = cmd.autoWrap === false ? cmd : {
-                        ...cmd,
-                        execute: async (msg, params, context) => {
-                            await helpers.smartErrorRespond(context.bot, msg, {
-                                processingText: ui.processingText || `⏳ Running *${cmd.name}*...`,
-                                errorText: ui.errorText || `❌ *${cmd.name}* failed.`,
-                                actionFn: async () => {
-                                    return await cmd.execute(msg, params, context);
-                                }
-                            });
-                        }
+            // Validate and setup module metadata
+            try {
+                if (!moduleInstance.metadata) {
+                    logger.warn(`⚠️ Module '${actualModuleId}' has no metadata, adding defaults`);
+                    moduleInstance.metadata = {
+                        description: 'No description provided',
+                        version: 'Unknown',
+                        author: 'Unknown',
+                        category: 'Uncategorized',
+                        dependencies: []
                     };
-
-                    this.bot.messageHandler.registerCommandHandler(cmd.name, wrappedCmd);
                 }
+                logger.info(`✅ Module metadata validated: ${actualModuleId}`);
+            } catch (metadataError) {
+                logger.error(`❌ Failed to setup metadata for module '${actualModuleId}':`, metadataError);
+                throw metadataError;
             }
-            if (moduleInstance.messageHooks && typeof moduleInstance.messageHooks === 'object' && moduleInstance.messageHooks !== null) {
-                for (const [hook, fn] of Object.entries(moduleInstance.messageHooks)) {
-                    this.bot.messageHandler.registerMessageHook(hook, fn.bind(moduleInstance));
+
+            // Try to initialize the module
+            try {
+                if (moduleInstance.init && typeof moduleInstance.init === 'function') {
+                    logger.info(`🔄 Initializing module: ${actualModuleId}`);
+                    await moduleInstance.init();
+                    logger.info(`✅ Module initialized successfully: ${actualModuleId}`);
+                } else {
+                    logger.info(`ℹ️ Module '${actualModuleId}' has no init method, skipping initialization`);
                 }
+            } catch (initError) {
+                logger.error(`❌ Failed to initialize module '${actualModuleId}':`, initError);
+                logger.error(`❌ Init error details:`, {
+                    message: initError.message,
+                    stack: initError.stack
+                });
+                throw initError;
             }
 
-            this.modules.set(actualModuleId, {
-                instance: moduleInstance,
-                path: filePath,
-                isSystem
-            });
+            // Register commands
+            try {
+                if (Array.isArray(moduleInstance.commands)) {
+                    logger.info(`🔄 Registering ${moduleInstance.commands.length} commands for module: ${actualModuleId}`);
+                    
+                    for (const cmd of moduleInstance.commands) {
+                        try {
+                            if (!cmd.name || !cmd.description || !cmd.usage || !cmd.execute) {
+                                logger.warn(`⚠️ Invalid command in module ${actualModuleId}:`, {
+                                    name: cmd.name,
+                                    description: cmd.description,
+                                    usage: cmd.usage,
+                                    hasExecute: typeof cmd.execute === 'function'
+                                });
+                                continue;
+                            }
 
-            if (isSystem) {
-                this.systemModulesCount++;
-            } else {
-                this.customModulesCount++;
+                            const ui = cmd.ui || {};
+
+                            const wrappedCmd = cmd.autoWrap === false ? cmd : {
+                                ...cmd,
+                                execute: async (msg, params, context) => {
+                                    await helpers.smartErrorRespond(context.bot, msg, {
+                                        processingText: ui.processingText || `⏳ Running *${cmd.name}*...`,
+                                        errorText: ui.errorText || `❌ *${cmd.name}* failed.`,
+                                        actionFn: async () => {
+                                            return await cmd.execute(msg, params, context);
+                                        }
+                                    });
+                                }
+                            };
+
+                            this.bot.messageHandler.registerCommandHandler(cmd.name, wrappedCmd);
+                            logger.info(`✅ Command registered: ${cmd.name} for module ${actualModuleId}`);
+                        } catch (cmdError) {
+                            logger.error(`❌ Failed to register command '${cmd.name}' for module '${actualModuleId}':`, cmdError);
+                            throw cmdError;
+                        }
+                    }
+                } else {
+                    logger.info(`ℹ️ Module '${actualModuleId}' has no commands to register`);
+                }
+            } catch (commandError) {
+                logger.error(`❌ Failed to register commands for module '${actualModuleId}':`, commandError);
+                throw commandError;
             }
 
-            logger.info(`✅ Loaded ${isSystem ? 'System' : 'Custom'} module: ${actualModuleId}`);
+            // Register message hooks
+            try {
+                if (moduleInstance.messageHooks && typeof moduleInstance.messageHooks === 'object' && moduleInstance.messageHooks !== null) {
+                    logger.info(`🔄 Registering message hooks for module: ${actualModuleId}`);
+                    
+                    for (const [hook, fn] of Object.entries(moduleInstance.messageHooks)) {
+                        try {
+                            if (typeof fn !== 'function') {
+                                logger.warn(`⚠️ Invalid message hook '${hook}' in module ${actualModuleId}: not a function`);
+                                continue;
+                            }
+                            
+                            this.bot.messageHandler.registerMessageHook(hook, fn.bind(moduleInstance));
+                            logger.info(`✅ Message hook registered: ${hook} for module ${actualModuleId}`);
+                        } catch (hookError) {
+                            logger.error(`❌ Failed to register message hook '${hook}' for module '${actualModuleId}':`, hookError);
+                            throw hookError;
+                        }
+                    }
+                } else {
+                    logger.info(`ℹ️ Module '${actualModuleId}' has no message hooks to register`);
+                }
+            } catch (hookError) {
+                logger.error(`❌ Failed to register message hooks for module '${actualModuleId}':`, hookError);
+                throw hookError;
+            }
+
+            // Store module information
+            try {
+                this.modules.set(actualModuleId, {
+                    instance: moduleInstance,
+                    path: filePath,
+                    isSystem
+                });
+
+                if (isSystem) {
+                    this.systemModulesCount++;
+                } else {
+                    this.customModulesCount++;
+                }
+
+                logger.info(`✅ Module stored successfully: ${actualModuleId}`);
+                logger.info(`✅ Loaded ${isSystem ? 'System' : 'Custom'} module: ${actualModuleId}`);
+            } catch (storeError) {
+                logger.error(`❌ Failed to store module '${actualModuleId}':`, storeError);
+                throw storeError;
+            }
+
         } catch (err) {
-            logger.error(`❌ Failed to load module '${moduleId}' from ${filePath}:`, err);
+            logger.error(`❌ COMPLETE FAILURE loading module '${moduleId}' from ${filePath}:`);
+            logger.error(`❌ Error Type: ${err.constructor.name}`);
+            logger.error(`❌ Error Message: ${err.message}`);
+            logger.error(`❌ Error Code: ${err.code}`);
+            logger.error(`❌ Error Stack:`, err.stack);
+            
+            // Additional debugging info
+            logger.error(`❌ Module file exists: ${fs.existsSync(filePath)}`);
+            logger.error(`❌ Module file path: ${filePath}`);
+            logger.error(`❌ Working directory: ${process.cwd()}`);
+            logger.error(`❌ Module loader directory: ${__dirname}`);
+            
+            // Check if it's a dependency issue
+            if (err.code === 'MODULE_NOT_FOUND') {
+                logger.error(`❌ Missing dependency detected. Error details:`, {
+                    requireStack: err.requireStack,
+                    path: err.path
+                });
+            }
+            
+            throw err;
         }
     }
-
-    getModule(name) {
-        return this.modules.get(name)?.instance || null;
-    }
-
-    listModules() {
-        return [...this.modules.keys()];
-    }
-
     async unloadModule(moduleId) {
         const moduleInfo = this.modules.get(moduleId);
         if (!moduleInfo) {
