@@ -779,6 +779,7 @@ async sendStartMessage() {
     }
 
        async syncOutgoingMessage(whatsappMsg, text, topicId, sender) {
+            if (!config.get('telegram.features.sendOutgoingMessages')) return;
         try {
             if (whatsappMsg.message?.ptvMessage || (whatsappMsg.message?.videoMessage?.ptv)) {
                 await this.handleWhatsAppMedia(whatsappMsg, 'video_note', topicId, true);
@@ -925,7 +926,7 @@ async sendStartMessage() {
             await this.saveChatMapping(chatJid, topic.message_thread_id, profilePicUrl);
             logger.info(`🆕 Created Telegram topic: "${topicName}" (ID: ${topic.message_thread_id}) for ${chatJid}`);
 
-            if (!isStatus && !isCall) {
+            if (!isStatus && !isCall && config.get('telegram.features.welcomeMessage')) {
                 await this.sendWelcomeMessage(topic.message_thread_id, chatJid, isGroup, whatsappMsg, profilePicUrl);
             }
 
