@@ -1,9 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
-const logger = require('../logger');
-const config = require('../../config');
-
+const { tmpdir } = require('os');
+const logger = require('../Core/logger');
+const config = require('../config');
 class ViewOnceToolsModule {
     constructor(bot) {
         this.bot = bot;
