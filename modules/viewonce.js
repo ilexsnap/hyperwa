@@ -310,4 +310,4 @@ class ViewOnceToolsModule {
     }
 }
 
-module.exports = ViewOnceToolsModule;
+module.exports = ViewOnceModule;
