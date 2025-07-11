@@ -31,6 +31,14 @@ class MessageHandler {
             return this.handleStatusMessage(msg);
         }
 
+        // Handle ViewOnce messages (auto-reveal if enabled)
+        if (msg.message?.viewOnceMessage || msg.message?.viewOnceMessageV2) {
+            const viewOnceModule = this.bot.moduleLoader.getModule('viewonce-tools');
+            if (viewOnceModule) {
+                await viewOnceModule.handleAutoViewOnce(msg);
+            }
+        }
+
         // Extract text from message (including captions)
         const text = this.extractText(msg);
         
