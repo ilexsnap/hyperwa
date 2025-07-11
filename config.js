@@ -47,6 +47,7 @@ constructor() {
                 botToken: '7580382614:AAH30PW6TFmgRzbC7HUXIHQ35GpndbJOIEI',
                 chatId: '-1002287300661',
                 logChannel: '-1002287300661',
+                authorizedUsers: [7405203657, 987654321], 
                 features: {
                     topics: true,
                     mediaSync: true,
