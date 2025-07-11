@@ -1338,12 +1338,6 @@ async handleWhatsAppContact(whatsappMsg, topicId, isOutgoing = false) {
         const isReply = !!msg.reply_to_message;
         const senderId = msg.from?.id;
 
-        // 🔒 Optional: Block unauthorized users
-        if (!this.isUserAuthorized?.(senderId)) {
-            logger.warn(`⛔ Unauthorized user ${senderId} tried to send a message.`);
-            await this.setReaction(msg.chat.id, msg.message_id, '⛔');
-            return;
-        }
 
         // ✅ If replying, mark original WhatsApp message as read
         if (isReply && this.telegramMessageMap) {
