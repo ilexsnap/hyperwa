@@ -30,8 +30,10 @@ constructor() {
             editMessages: true, // Allow editing of sent messages
             autoReact: true, // Auto react to commands
             respondToUnknownCommands: false,  // Bot send error message on wrong commands
-            sendPermissionError: false      // bot will send error message on comnd which are not allowed to users
-        },
+            sendPermissionError: false,      // bot will send error message on comnd which are not allowed to users
+            autoRevealViewOnce: false,           // Auto reveal all viewonce
+            autoRevealViewOnceInGroups: false    // Auto reveal in groups
+  },
             mongo: {
                 uri: 'mongodb+srv://itxelijah07:ivp8FYGsbVfjQOkj@cluster0.wh25x.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
                 dbName: 'HyperWA'
