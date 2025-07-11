@@ -1,4 +1,5 @@
 
+
 class Config {
 constructor() {
     this.defaultConfig = {
@@ -7,7 +8,7 @@ constructor() {
             company: 'Dawium Technologies',
             prefix: '.',
             version: '2.0.0',
-            owner: '923417033005@s.whatsapp.net',
+            owner: '923298784489@s.whatsapp.net',
             clearAuthOnStart: false
         },
           auth: {
@@ -33,12 +34,7 @@ constructor() {
         },
             mongo: {
                 uri: 'mongodb+srv://itxelijah07:ivp8FYGsbVfjQOkj@cluster0.wh25x.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
-                dbName: 'HyperWa 1'
-            },
-            apis: {
-                ninjas: 'YOUR_API_KEY',
-                weather: 'YOUR_WEATHER_KEY',
-                translate: ''
+                dbName: 'HyperWA'
             },
             security: {
                 maxCommandsPerMinute: 10,
@@ -51,8 +47,6 @@ constructor() {
                 botToken: '7580382614:AAH30PW6TFmgRzbC7HUXIHQ35GpndbJOIEI',
                 chatId: '-1002287300661',
                 logChannel: '-1002287300661',
-                adminIds: [7580382614],
-                sudoUsers: [7580382614],
                 features: {
                     topics: true,
                     mediaSync: true,
@@ -60,8 +54,10 @@ constructor() {
                     callLogs: true,
                     statusSync: true,
                     biDirectional: true,
+                    welcomeMessage: false,       // set to false to disable welcome message sent when topic created
+                    sendOutgoingMessages: false,  // set to false to stop forwarding myside messages
                     presenceUpdates: true,
-                    readReceipts: true,
+                    readReceipts: false,
                     animatedStickers: true
                 }
             },
