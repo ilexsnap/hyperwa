@@ -2,17 +2,15 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const { tmpdir } = require('os');
-const axios = require('axios');
-const FormData = require('form-data');
 const logger = require('../logger');
 const config = require('../../config');
 
 class ViewOnceToolsModule {
     constructor(bot) {
         this.bot = bot;
-        this.name = 'viewoncetools';
+        this.name = 'viewonce';
         this.metadata = {
-            description: 'Tools for handling viewonce messages and image enhancement.',
+            description: 'Tools for handling viewonce messages.',
             version: '1.0.0',
             author: 'Your Name',
             category: 'utility'
@@ -27,28 +25,6 @@ class ViewOnceToolsModule {
                 ui: {
                     processingText: '🔍 Revealing viewonce message...',
                     errorText: '❌ Failed to reveal viewonce message.'
-                }
-            },
-            {
-                name: 'remini',
-                description: 'Enhance image quality using AI.',
-                usage: '.remini (reply to an image)',
-                permissions: 'public',
-                execute: this.reminiCommand.bind(this),
-                ui: {
-                    processingText: '🎨 Enhancing image quality... This may take a moment.',
-                    errorText: '❌ Failed to enhance image.'
-                }
-            },
-            {
-                name: 'enhance',
-                description: 'Enhance image quality using AI (alias for .remini).',
-                usage: '.enhance (reply to an image)',
-                permissions: 'public',
-                execute: this.reminiCommand.bind(this),
-                ui: {
-                    processingText: '🎨 Enhancing image quality... This may take a moment.',
-                    errorText: '❌ Failed to enhance image.'
                 }
             }
         ];
@@ -96,28 +72,6 @@ class ViewOnceToolsModule {
                 text: '❌ Unsupported viewonce message type.'
             });
         }
-    }
-
-    async reminiCommand(msg, params, context) {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-
-        if (!quotedMsg || !quotedMsg.imageMessage) {
-            return context.bot.sendMessage(context.sender, {
-                text: '❌ Please reply to an image to enhance it.'
-            });
-        }
-
-        const imageBuffer = await this.downloadMedia(quotedMsg.imageMessage);
-        if (!imageBuffer) {
-            throw new Error('Failed to download image');
-        }
-
-        const enhancedImageUrl = await this.enhanceImage(imageBuffer);
-
-        await context.bot.sendMessage(context.sender, {
-            image: { url: enhancedImageUrl },
-            caption: '✨ Image enhanced successfully!'
-        });
     }
 
     async handleViewOnceImage(imageMessage, context) {
@@ -204,46 +158,6 @@ class ViewOnceToolsModule {
                 }
             });
         });
-    }
-
-    async enhanceImage(imageBuffer) {
-        const uploadUrl = await this.uploadImage(imageBuffer);
-
-        const apiKey = config.get('api.neoxrKey') || 'demo';
-        const response = await axios.post('https://api.neoxr.my.id/api/remini', {
-            image: uploadUrl
-        }, {
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.data.status) {
-            throw new Error('Enhancement API failed');
-        }
-
-        return response.data.data.url;
-    }
-
-    async uploadImage(imageBuffer) {
-        const formData = new FormData();
-        formData.append('file', imageBuffer, {
-            filename: 'image.jpg',
-            contentType: 'image/jpeg'
-        });
-
-        const response = await axios.post('https://tmpfiles.org/api/v1/upload', formData, {
-            headers: {
-                ...formData.getHeaders()
-            }
-        });
-
-        if (response.data && response.data.data && response.data.data.url) {
-            return response.data.data.url;
-        }
-
-        throw new Error('Upload failed');
     }
 
     async handleAutoViewOnce(msg) {
