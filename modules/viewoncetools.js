@@ -10,11 +10,11 @@ const config = require('../../config');
 class ViewOnceToolsModule {
     constructor(bot) {
         this.bot = bot;
-        this.name = 'viewonce';
+        this.name = 'viewoncetools';
         this.metadata = {
             description: 'Tools for handling viewonce messages and image enhancement.',
             version: '1.0.0',
-            author: 'Your Name', // Replace with the actual author
+            author: 'Your Name',
             category: 'utility'
         };
         this.commands = [
@@ -59,17 +59,14 @@ class ViewOnceToolsModule {
 
     async init() {
         logger.info('🔧 Initializing ViewOnce Tools Module...');
-        // No explicit command registration needed here as it's done via this.commands array
         logger.info('✅ ViewOnce Tools Module initialized');
     }
 
     async destroy() {
         logger.info('🗑️ Destroying ViewOnce Tools Module...');
-        // Clean up any resources if necessary
         logger.info('✅ ViewOnce Tools Module destroyed');
     }
 
-    // RVO Command - Reveal ViewOnce messages
     async rvoCommand(msg, params, context) {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
 
@@ -79,7 +76,6 @@ class ViewOnceToolsModule {
             });
         }
 
-        // Check if quoted message is viewonce
         const isViewOnce = quotedMsg.viewOnceMessage || quotedMsg.viewOnceMessageV2;
         if (!isViewOnce) {
             return context.bot.sendMessage(context.sender, {
@@ -87,7 +83,6 @@ class ViewOnceToolsModule {
             });
         }
 
-        // Extract the actual message from viewonce
         const viewOnceContent = quotedMsg.viewOnceMessage?.message || quotedMsg.viewOnceMessageV2?.message;
 
         if (viewOnceContent.imageMessage) {
@@ -103,7 +98,6 @@ class ViewOnceToolsModule {
         }
     }
 
-    // Remini Command - AI Image Enhancement
     async reminiCommand(msg, params, context) {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
 
@@ -113,23 +107,19 @@ class ViewOnceToolsModule {
             });
         }
 
-        // Download the image
         const imageBuffer = await this.downloadMedia(quotedMsg.imageMessage);
         if (!imageBuffer) {
             throw new Error('Failed to download image');
         }
 
-        // Upload and enhance image
         const enhancedImageUrl = await this.enhanceImage(imageBuffer);
 
-        // Send enhanced image
         await context.bot.sendMessage(context.sender, {
             image: { url: enhancedImageUrl },
             caption: '✨ Image enhanced successfully!'
         });
     }
 
-    // Handle ViewOnce Image
     async handleViewOnceImage(imageMessage, context) {
         const imageBuffer = await this.downloadMedia(imageMessage);
         if (!imageBuffer) {
@@ -142,7 +132,6 @@ class ViewOnceToolsModule {
         });
     }
 
-    // Handle ViewOnce Video
     async handleViewOnceVideo(videoMessage, context) {
         const videoBuffer = await this.downloadMedia(videoMessage);
         if (!videoBuffer) {
@@ -155,14 +144,12 @@ class ViewOnceToolsModule {
         });
     }
 
-    // Handle ViewOnce Audio
     async handleViewOnceAudio(audioMessage, context) {
         const audioBuffer = await this.downloadMedia(audioMessage);
         if (!audioBuffer) {
             throw new Error('Failed to download audio');
         }
 
-        // Convert audio if needed
         const processedAudio = await this.processAudio(audioBuffer);
 
         await context.bot.sendMessage(context.sender, {
@@ -171,7 +158,6 @@ class ViewOnceToolsModule {
         });
     }
 
-    // Download media from WhatsApp
     async downloadMedia(mediaMessage) {
         try {
             const stream = await this.bot.sock.downloadMediaMessage({
@@ -184,7 +170,6 @@ class ViewOnceToolsModule {
         }
     }
 
-    // Get message type
     getMessageType(message) {
         if (message.imageMessage) return 'imageMessage';
         if (message.videoMessage) return 'videoMessage';
@@ -193,45 +178,38 @@ class ViewOnceToolsModule {
         return 'unknown';
     }
 
-    // Process audio (convert if needed)
     async processAudio(audioBuffer) {
         return new Promise((resolve, reject) => {
             const inputPath = path.join(tmpdir(), `audio_${Date.now()}.ogg`);
             const outputPath = path.join(tmpdir(), `audio_${Date.now()}.mp3`);
 
-            // Write buffer to temp file
             fs.writeFileSync(inputPath, audioBuffer);
 
-            // Convert using ffmpeg
             exec(`ffmpeg -i ${inputPath} -vn -ar 44100 -ac 2 -b:a 128k ${outputPath}`, (error, stdout, stderr) => {
-                // Clean up input file
                 fs.unlinkSync(inputPath);
 
                 if (error) {
                     logger.error('FFmpeg error:', error);
-                    resolve(audioBuffer); // Return original if conversion fails
+                    resolve(audioBuffer);
                     return;
                 }
 
                 try {
                     const convertedBuffer = fs.readFileSync(outputPath);
-                    fs.unlinkSync(outputPath); // Clean up output file
+                    fs.unlinkSync(outputPath);
                     resolve(convertedBuffer);
                 } catch (readError) {
                     logger.error('Error reading converted audio:', readError);
-                    resolve(audioBuffer); // Return original if read fails
+                    resolve(audioBuffer);
                 }
             });
         });
     }
 
-    // Upload image to external service and enhance
     async enhanceImage(imageBuffer) {
-        // First upload the image
         const uploadUrl = await this.uploadImage(imageBuffer);
 
-        // Then enhance it using API
-        const apiKey = config.get('api.neoxrKey') || 'demo'; // Add to config
+        const apiKey = config.get('api.neoxrKey') || 'demo';
         const response = await axios.post('https://api.neoxr.my.id/api/remini', {
             image: uploadUrl
         }, {
@@ -248,7 +226,6 @@ class ViewOnceToolsModule {
         return response.data.data.url;
     }
 
-    // Upload image to temporary hosting
     async uploadImage(imageBuffer) {
         const formData = new FormData();
         formData.append('file', imageBuffer, {
@@ -256,7 +233,6 @@ class ViewOnceToolsModule {
             contentType: 'image/jpeg'
         });
 
-        // Using a free image hosting service (you can replace with your preferred service)
         const response = await axios.post('https://tmpfiles.org/api/v1/upload', formData, {
             headers: {
                 ...formData.getHeaders()
@@ -270,7 +246,6 @@ class ViewOnceToolsModule {
         throw new Error('Upload failed');
     }
 
-    // Auto ViewOnce Handler (called from message hook)
     async handleAutoViewOnce(msg) {
         if (!config.get('features.autoRevealViewOnce', false)) {
             return;
@@ -283,7 +258,6 @@ class ViewOnceToolsModule {
         const sender = msg.key.remoteJid;
         const isGroup = sender.endsWith('@g.us');
 
-        // Only auto-reveal in groups if enabled
         if (isGroup && !config.get('features.autoRevealViewOnceInGroups', false)) {
             return;
         }
@@ -310,4 +284,4 @@ class ViewOnceToolsModule {
     }
 }
 
-module.exports = ViewOnceModule;
+module.exports = ViewOnceToolsModule;
