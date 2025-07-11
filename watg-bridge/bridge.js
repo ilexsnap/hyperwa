@@ -606,73 +606,23 @@ async sendStartMessage() {
     }
 
     async syncMessage(whatsappMsg) {
-    // 1. **Initial Checks from Code 2:**
-    //    Ensure the Telegram bot is enabled and initialized before proceeding.
-    //    This prevents errors if the Telegram integration is not active.
-    if (!this.telegramBot || !config.get('telegram.enabled')) {
-        logger.warn('Telegram bot is not enabled or initialized. Skipping message sync.');
-        return;
-    }
-
     try {
         const sender = whatsappMsg.key.remoteJid;
         const isGroup = sender.endsWith('@g.us');
-        const isFromMe = whatsappMsg.key.fromMe; // Feature from Code 2
-
-        // 2. **Handling Status Messages from Code 2:**
-        //    WhatsApp status updates are distinct and usually not forwarded to chat.
-        if (sender === 'status@broadcast') {
-            // Assuming you have a handler for status messages.
-            // You might just log them or ignore them, or forward to a specific status channel.
-            await this.handleWhatsAppStatus(whatsappMsg); // A new handler you'd need to implement
-            logger.info(`Ignored WhatsApp status message from ${whatsappMsg.key.participant || sender}`);
-            return;
-        }
-
-        // 3. **Handling Outgoing Messages (fromMe) from Code 2:**
-        //    If the message was sent by our own WhatsApp account, we typically
-        //    don't want to forward it as a new incoming message to Telegram.
-        //    Instead, we might want to update an existing message in Telegram
-        //    (if it originated from Telegram) or simply ignore it for forwarding.
-        if (isFromMe) {
-            // Assuming you have a mechanism to map your outgoing WhatsApp messages
-            // back to Telegram messages (e.g., if they were replies from Telegram).
-            // This `syncOutgoingMessage` would ideally update a previously sent Telegram message.
-            const existingTopicId = this.chatMappings.get(sender); // Assuming chatMappings exists and tracks conversations
-            if (existingTopicId) {
-                // You'll need to decide what 'text' to pass here.
-                // For outgoing, it's usually the content of the message.
-                const outgoingContent = whatsappMsg.message?.conversation || whatsappMsg.message?.extendedTextMessage?.text || null;
-                await this.syncOutgoingMessage(whatsappMsg, outgoingContent, existingTopicId, sender);
-                logger.info(`Handled outgoing WhatsApp message to ${sender}`);
-            } else {
-                 logger.debug(`Outgoing WhatsApp message to ${sender} did not have an existing topic, ignoring for sync.`);
-            }
-            return; // Stop processing further for outgoing messages
-        }
-
-        // --- Rest of Code 1's original logic for INCOMING messages ---
 
         const topicId = await this.getOrCreateTopic(sender);
-        if (!topicId) {
-            logger.warn(`Could not get or create topic for ${sender}. Skipping message sync.`);
-            return;
-        }
+        if (!topicId) return;
 
         const message = whatsappMsg.message || {};
         const content = message.conversation || message.extendedTextMessage?.text || null;
 
-        // Use 'participant' for group messages to correctly identify the sender in a group
         const senderId = isGroup ? whatsappMsg.key.participant : sender;
         const senderPhone = senderId?.split('@')[0];
-        const senderName = this.contactMappings.get(senderPhone) || senderPhone; // Assumes contactMappings exists
+        const senderName = this.contactMappings.get(senderPhone) || senderPhone;
 
         const quotedMsg = message?.extendedTextMessage?.contextInfo?.quotedMessage;
         const quotedText = quotedMsg?.conversation || quotedMsg?.extendedTextMessage?.text;
 
-        // **Refined Group Message Handling / Prefixing:**
-        // This part was already quite good in Code 1. We're just ensuring
-        // the `senderName` is consistently used for group message prefixes.
         const prefix = isGroup ? `👤 ${senderName}:\n` : '';
         const fullText = quotedText
             ? `${prefix}🧾 _${quotedText}_\n\n${content}`
@@ -697,16 +647,11 @@ async sendStartMessage() {
         } else if (message?.contactMessage) {
             sent = await this.handleWhatsAppContact(whatsappMsg, topicId);
         } else if (content) {
-            const textToSend = `📥 ${fullText}`; // Already adds "📥 " for incoming text
+            const textToSend = `📥 ${fullText}`;
             sent = await this.sendSimpleMessage(topicId, textToSend, senderId);
-        } else {
-            logger.debug(`Received an unhandled message type from ${sender}. WhatsApp message key: ${whatsappMsg.key.id}`);
         }
 
-
         // ✅ Track Telegram message ID → WhatsApp key for read receipts
-        // Consider migrating to a 'queueMessageForReadReceipt' if you need
-        // more control or asynchronous processing, as suggested in Code 2.
         if (sent?.message_id) {
             this.telegramMessageMap.set(`${topicId}:${sent.message_id}`, whatsappMsg.key);
         }
@@ -1392,6 +1337,13 @@ async handleWhatsAppContact(whatsappMsg, topicId, isOutgoing = false) {
 
         const isReply = !!msg.reply_to_message;
         const senderId = msg.from?.id;
+
+        // 🔒 Optional: Block unauthorized users
+        if (!this.isUserAuthorized?.(senderId)) {
+            logger.warn(`⛔ Unauthorized user ${senderId} tried to send a message.`);
+            await this.setReaction(msg.chat.id, msg.message_id, '⛔');
+            return;
+        }
 
         // ✅ If replying, mark original WhatsApp message as read
         if (isReply && this.telegramMessageMap) {
