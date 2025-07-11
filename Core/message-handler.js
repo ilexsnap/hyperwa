@@ -6,18 +6,44 @@ class MessageHandler {
     constructor(bot) {
         this.bot = bot;
         this.commandHandlers = new Map();
+        this.messageHooks = new Map(); // Store message hooks
     }
 
-    registerCommandHandler(command, handler) {
-        this.commandHandlers.set(command.toLowerCase(), handler);
-        logger.debug(`📝 Registered command handler: ${command}`);
+    // Register a message hook
+    registerMessageHook(hook, handler) {
+        if (!this.messageHooks.has(hook)) {
+            this.messageHooks.set(hook, []);
+        }
+        this.messageHooks.get(hook).push(handler);
+        logger.debug(`📝 Registered message hook: ${hook}`);
     }
 
+    // Unregister a message hook
+    unregisterMessageHook(hook) {
+        this.messageHooks.delete(hook);
+        logger.debug(`🗑️ Unregistered message hook: ${hook}`);
+    }
+
+    // Call registered hooks for a specific event
+    async triggerMessageHooks(hook, msg) {
+        const handlers = this.messageHooks.get(hook) || [];
+        for (const handler of handlers) {
+            try {
+                await handler(msg);
+            } catch (error) {
+                logger.error(`Error in ${hook} hook:`, error);
+            }
+        }
+    }
+
+    // Modified handleMessages to trigger hooks
     async handleMessages({ messages, type }) {
         if (type !== 'notify') return;
 
         for (const msg of messages) {
             try {
+                // Trigger message.any hook before processing
+                await this.triggerMessageHooks('message.any', msg);
                 await this.processMessage(msg);
             } catch (error) {
                 logger.error('Error processing message:', error);
